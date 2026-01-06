@@ -78,27 +78,75 @@ def clean_interpretation_text(text: str) -> str:
 # 청킹 함수
 # ============================================================
 def chunk_law_data(law_data: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """법령 데이터를 조문 단위로 청킹"""
+    """법령 데이터를 조문 > 항(①②③) 단위로 청킹"""
     chunks = []
+
+    # 항 번호 기호들
+    PARAGRAPH_MARKERS = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
 
     for article in law_data.get('articles', []):
         content = clean_law_content(article.get('content', ''))
-        if not content or len(content) < 10:  # 너무 짧은 조문 제외
+        if not content or len(content) < 10:
             continue
 
-        chunk = {
-            'text': content,
-            'metadata': {
-                'source': 'law',
-                'law_title': law_data.get('title', ''),
-                'category': law_data.get('category', ''),
-                'article_num': article.get('article_num', ''),
-                'is_addendum': article.get('is_addendum', False),
-                'url': law_data.get('url', ''),
-                'lsi_seq': law_data.get('lsi_seq', '')
-            }
+        article_num = article.get('article_num', '')
+        law_title = law_data.get('title', '')
+        base_metadata = {
+            'source': 'law',
+            'law_title': law_title,
+            'category': law_data.get('category', ''),
+            'article_num': article_num,
+            'is_addendum': article.get('is_addendum', False),
+            'url': law_data.get('url', ''),
+            'lsi_seq': law_data.get('lsi_seq', '')
         }
-        chunks.append(chunk)
+
+        # 항(①②③) 기호가 있는지 확인
+        has_paragraphs = any(marker in content for marker in PARAGRAPH_MARKERS)
+
+        if not has_paragraphs or len(content) <= 500:
+            # 항 구분 없거나 짧으면 통째로 1청크
+            chunks.append({
+                'text': content,
+                'metadata': {**base_metadata, 'paragraph': '', 'chunk_index': 0}
+            })
+        else:
+            # 항(①②③) 기호로 분할
+            pattern = f'([{PARAGRAPH_MARKERS}])'
+            parts = re.split(pattern, content)
+
+            current_text = ""
+            current_para = ""
+            chunk_index = 0
+
+            for i, part in enumerate(parts):
+                if part in PARAGRAPH_MARKERS:
+                    # 이전 항 저장
+                    if current_text.strip() and len(current_text.strip()) > 10:
+                        chunks.append({
+                            'text': current_text.strip(),
+                            'metadata': {
+                                **base_metadata,
+                                'paragraph': current_para,
+                                'chunk_index': chunk_index
+                            }
+                        })
+                        chunk_index += 1
+                    current_para = part
+                    current_text = part
+                else:
+                    current_text += part
+
+            # 마지막 항 저장
+            if current_text.strip() and len(current_text.strip()) > 10:
+                chunks.append({
+                    'text': current_text.strip(),
+                    'metadata': {
+                        **base_metadata,
+                        'paragraph': current_para,
+                        'chunk_index': chunk_index
+                    }
+                })
 
     return chunks
 
