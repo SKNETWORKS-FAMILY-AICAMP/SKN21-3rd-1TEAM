@@ -46,7 +46,6 @@ env/
 logs/
 
 # Data files (large JSON files)
-A-TEAM/data/raw/*.json
 !A-TEAM/data/raw/.gitkeep
 
 # Temporary files
