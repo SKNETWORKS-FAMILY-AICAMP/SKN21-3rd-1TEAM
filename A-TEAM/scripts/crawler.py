@@ -4,6 +4,15 @@ from playwright.sync_api import sync_playwright
 import json
 import time
 import re
+import os
+
+# 데이터 저장 경로 설정
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(SCRIPT_DIR, '..', 'data')
+RAW_DIR = os.path.join(DATA_DIR, 'raw')
+
+# 디렉토리 생성
+os.makedirs(RAW_DIR, exist_ok=True)
 
 # Session for list API
 session = requests.Session()
@@ -241,16 +250,16 @@ def main():
     print("[Step 2] 상세 페이지 크롤링 (Playwright)...")
     results = get_law_details_with_playwright(laws, max_count=len(laws))
 
-    # Step 3: 결과 저장
+    # Step 3: 결과 저장 - raw 폴더
     if results:
         # 전체 통합 파일 저장
-        save_results(results, 'law_data_all.json')
+        save_results(results, os.path.join(RAW_DIR, 'law_data_all.json'))
 
         # 분야별 별도 파일 저장
         for cat in CATEGORIES:
             cat_results = [r for r in results if r['category'] == cat['name']]
             if cat_results:
-                filename = f"{cat['name']}.json"
+                filename = os.path.join(RAW_DIR, f"{cat['name']}.json")
                 save_results(cat_results, filename)
 
         print(f"\n=== 크롤링 완료 ===")

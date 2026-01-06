@@ -1,6 +1,7 @@
 """
 노동고용부 행정해석(질의회시) 크롤러
 URL: https://www.moel.go.kr/info/publicdata/qnrinfo/qnrInfoList.do
+@@@@@@@  약 1분 소요 @@@@@@@@
 """
 
 import requests
@@ -9,7 +10,18 @@ from playwright.sync_api import sync_playwright
 import json
 import time
 import re
+import os
 from datetime import datetime
+
+# 데이터 저장 경로 설정
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(SCRIPT_DIR, '..', 'data')
+RAW_DIR = os.path.join(DATA_DIR, 'raw')
+PROCESSED_DIR = os.path.join(DATA_DIR, 'processed')
+
+# 디렉토리 생성
+os.makedirs(RAW_DIR, exist_ok=True)
+os.makedirs(PROCESSED_DIR, exist_ok=True)
 
 # 세션
 session = requests.Session()
@@ -360,16 +372,17 @@ def main():
         print("게시글을 가져오지 못했습니다.")
         return
 
-    # 목록만 먼저 저장 (안전망)
-    save_results(posts, '행정해석_목록.json')
+    # 목록만 먼저 저장 (안전망) - raw 폴더
+    save_results(posts, os.path.join(RAW_DIR, '행정해석_목록.json'))
 
     # Step 2: 상세 내용 크롤링 + 파싱
     print("\n[Step 2] 상세 내용 크롤링 및 파싱 중...")
     results = crawl_with_details(posts)
 
-    # Step 3: 최종 결과 저장
+    # Step 3: 최종 결과 저장 - processed 폴더
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    save_results(results, f'행정해석_{timestamp}.json')
+    save_results(results, os.path.join(
+        PROCESSED_DIR, f'행정해석_{timestamp}.json'))
 
     # 통계
     success_count = sum(1 for r in results if r['parsed']['parse_success'])
