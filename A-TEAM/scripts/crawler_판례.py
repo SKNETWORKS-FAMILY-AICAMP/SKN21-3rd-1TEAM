@@ -2,8 +2,6 @@ from playwright.sync_api import sync_playwright
 import json
 import time
 import re
-import signal
-import sys
 
 def parse_detail_page(page, detail_url):
     """상세 페이지에서 필요한 정보를 파싱합니다."""
