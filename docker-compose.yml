@@ -1,0 +1,16 @@
+# Qdrant Vector DB Server
+# A-TEAM, B-TEAM 공용
+
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: legal-qdrant
+    ports:
+      - "0.0.0.0:6333:6333" # REST API (네트워크 접근 허용)
+      - "0.0.0.0:6334:6334" # gRPC
+    volumes:
+      - ./data/qdrant_storage:/qdrant/storage
+    environment:
+      - QDRANT__LOG_LEVEL=INFO
+      - QDRANT__SERVICE__API_KEY=54a5555e-954a-4f2c-b3fb-343b1df6c7dc|HuyJdP2O-NbM2olYQ-2ey0G4IxIIrEM7zvsf3l091BUQ6uwQKqNPPQ  # API 키 인증
+    restart: unless-stopped
