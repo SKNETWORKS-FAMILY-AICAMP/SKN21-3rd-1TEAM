@@ -1,7 +1,7 @@
 import os
 import warnings
 from pathlib import Path
-from typing import Annotated, TypedDict, Sequence, Optional, List
+from typing import Annotated, TypedDict, Sequence, Optional, List, Literal
 from dotenv import load_dotenv
 
 # Qdrant & LangChain 관련 임포트
@@ -12,6 +12,8 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langchain_core.documents import Document
+from langchain_community.tools import TavilySearchResults
+from pydantic import BaseModel, Field
 
 # LangGraph 관련 임포트
 from langgraph.graph import StateGraph, END
@@ -31,100 +33,128 @@ class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
     # 사용자 질문
     user_query: str
-    # 질문 분류 결과
-    query_classification: Optional[str]
+    # 질문 분석 결과
+    query_analysis: Optional[dict]  # {category, needs_clarification, needs_case_law, clarification_question}
     # 검색 결과 (Document 리스트)
     retrieved_docs: Optional[List[Document]]
+    # 웹 검색으로 찾은 판례 정보
+    case_law_results: Optional[List[dict]]
     # 생성된 답변
     generated_answer: Optional[str]
-    # 검증 결과
-    validation_result: Optional[bool]
-    # 검증 피드백
-    validation_feedback: Optional[str]
-    # 재시도 횟수
-    retry_count: int
-
-
-# ===========================
-# 검색 함수 정의 (사전 준비 영역)
-# ===========================
-def create_search_function(vectorstore: QdrantVectorStore):
-    """법률 검색 함수 생성"""
-    
-    def search_legal_docs(query: str, k: int = 5) -> List[tuple]:
-        """
-        법률/판례/행정해석을 Qdrant에서 검색
-        
-        Args:
-            query: 검색 쿼리
-            k: 검색 결과 개수
-            
-        Returns:
-            (Document, score) 튜플의 리스트
-        """
-        results = vectorstore.similarity_search_with_score(query, k=k)
-        return results
-    
-    return search_legal_docs
+    # 현재 라우팅 결정
+    next_action: Optional[str]
 
 
 # ===========================
 # 노드 함수 정의 (LangGraph 영역)
 # ===========================
 
-def create_classify_node(llm: ChatOpenAI):
-    """노드 1: 질문 분류"""
+# Pydantic 모델: 질문 분석 결과
+class QueryAnalysis(BaseModel):
+    """LLM이 반환할 질문 분석 결과"""
+    category: str = Field(description="법률 분야: 노동법, 형사법, 민사법, 기타 중 하나")
+    needs_clarification: bool = Field(default=False, description="질문이 극도로 모호하여 답변 불가능한지")
+    needs_case_law: bool = Field(default=False, description="대법원 판례 검색이 필요한지")
+    clarification_question: str = Field(default="", description="명확화 필요 시 사용자에게 물어볼 질문")
+
+
+def create_analyze_query_node(llm: ChatOpenAI):
+    """노드 1: 질문 분석 (Structured Output 사용)"""
     
-    classify_prompt = ChatPromptTemplate.from_messages([
-        ("system", """당신은 법률 질문을 분류하는 전문가입니다.
-사용자의 질문을 다음 카테고리 중 하나로 분류하세요:
+    # Structured Output을 위한 LLM
+    structured_llm = llm.with_structured_output(QueryAnalysis)
+    
+    analyze_prompt = ChatPromptTemplate.from_messages([
+        ("system", """당신은 법률 질문을 분석하는 전문가입니다.
 
-1. 노동법 - 근로기준법, 노동조합, 임금, 퇴직금, 해고 등
-2. 형사법 - 범죄, 형벌, 수사, 재판 등
-3. 민사법 - 계약, 손해배상, 소유권, 채권 등
-4. 기타 - 위 카테고리에 속하지 않는 법률 질문
+1. category: 질문의 법률 분야
+   - "노동법": 근로기준법, 임금, 퇴직금, 해고, 산재, 주휴수당 등
+   - "형사법": 범죄, 형벌, 수사, 재판, 고소/고발 등
+   - "민사법": 계약, 손해배상, 소유권, 채권 등
+   - "기타": 위 카테고리에 속하지 않는 법률 질문
 
-분류 결과만 반환하세요. 예: "노동법", "형사법", "민사법", "기타" """),
+2. needs_clarification: 질문이 극도로 모호하여 어떤 답변도 불가능한지 (true/false)
+   - true: "법률 질문이요", "도와주세요", "계약" 처럼 1~2단어만 있는 경우
+   - false (대부분): 상황이 조금이라도 설명되어 있으면 답변 가능
+   - 예: "주15시간 이상 근무했는데 주휴수당을 안 줘" → false (답변 가능)
+   - 예: "해고당했어요" → false (부당해고 일반론 설명 가능)
+
+3. needs_case_law: 대법원 판례가 필요한지 (true/false)
+   - true: "판례", "판결", "대법원" 등을 명시적으로 언급하거나, 법적 해석이 필요한 쟁점 사안
+   - false: 단순 법령 조회, 절차/서식 문의
+
+4. clarification_question: needs_clarification이 true일 때만 작성"""),
         ("human", "{query}")
     ])
     
-    def classify_query(state: AgentState) -> AgentState:
-        """질문 분류 노드"""
+    def analyze_query(state: AgentState) -> AgentState:
+        """질문 분석 노드: Structured Output으로 분류/명확화/판례 필요 여부 판단"""
         query = state["user_query"]
         
-        chain = classify_prompt | llm
-        response = chain.invoke({"query": query})
-        classification = response.content.strip()
+        print(f"🔎 [질문 분석 중...]")
         
-        print(f"📋 [질문 분류] {classification}")
+        chain = analyze_prompt | structured_llm
+        analysis: QueryAnalysis = chain.invoke({"query": query})
+        
+        print(f"📋 [분석 결과] 분야: {analysis.category}")
+        print(f"   명확화 필요: {'예' if analysis.needs_clarification else '아니오'}")
+        print(f"   판례 필요: {'예' if analysis.needs_case_law else '아니오'}")
         
         return {
-            "query_classification": classification
+            "query_analysis": analysis.model_dump()
         }
     
-    return classify_query
+    return analyze_query
 
 
-def create_search_node(search_function):
-    """노드 2: 검색 실행"""
+def create_clarify_node(llm: ChatOpenAI):
+    """노드 2: 사용자에게 명확화 요청"""
+    
+    def request_clarification(state: AgentState) -> AgentState:
+        """명확화 요청 노드: 모호한 질문에 대해 구체적인 정보 요청"""
+        analysis = state.get("query_analysis", {})
+        clarification_q = analysis.get("clarification_question", "")
+        
+        if not clarification_q:
+            # 기본 명확화 질문
+            clarification_q = "질문을 좀 더 구체적으로 해주시겠어요? 어떤 상황인지, 무엇이 궁금하신지 자세히 알려주시면 더 정확한 답변을 드릴 수 있습니다."
+        
+        print(f"❓ [명확화 요청]")
+        
+        # 친절한 형식으로 답변 구성
+        answer = f"""안녕하세요! 질문을 잘 이해하기 위해 몇 가지 확인이 필요합니다.
+
+{clarification_q}
+
+위 내용을 포함해서 다시 질문해 주시면, 더 정확하고 도움이 되는 답변을 드릴 수 있습니다. 😊"""
+        
+        return {
+            "generated_answer": answer,
+            "next_action": "end"
+        }
+    
+    return request_clarification
+
+
+def create_search_node(vectorstore: QdrantVectorStore):
+    """노드 3: Qdrant 벡터DB 검색"""
     
     def search_documents(state: AgentState) -> AgentState:
-        """검색 실행 노드"""
+        """검색 실행 노드: Qdrant에서 관련 법령/문서 검색"""
         query = state["user_query"]
-        classification = state.get("query_classification", "기타")
+        analysis = state.get("query_analysis", {})
+        category = analysis.get("category", "기타")
         
-        # 검색 수행
-        print(f"🔍 [검색 실행] 쿼리: {query[:50]}...")
+        print(f"🔍 [법령 검색] 쿼리: {query[:50]}...")
         
-        # 재시도 시 검색 개수 증가
-        retry_count = state.get("retry_count", 0)
-        k = 5 + (retry_count * 3)  # 재시도마다 3개씩 더 검색
-        
-        results = search_function(query, k=k)
+        # 카테고리에 따른 검색 최적화 (향후 필터 추가 가능)
+        results = vectorstore.similarity_search_with_score(query, k=5)
         
         if results:
             docs = [doc for doc, score in results]
-            print(f"✅ [검색 완료] {len(docs)}개 문서 검색됨")
+            scores = [score for doc, score in results]
+            avg_score = sum(scores) / len(scores)
+            print(f"✅ [검색 완료] {len(docs)}개 문서 (평균 유사도: {avg_score:.3f})")
         else:
             docs = []
             print(f"⚠️  [검색 결과 없음]")
@@ -136,62 +166,151 @@ def create_search_node(search_function):
     return search_documents
 
 
+def create_case_law_search_node(llm: ChatOpenAI):
+    """노드 4: 웹 검색을 통한 대법원 판례 검색"""
+    
+    def search_case_law(state: AgentState) -> AgentState:
+        """대법원 판례 검색 노드: Tavily를 통해 관련 판례 웹 검색"""
+        query = state["user_query"]
+        analysis = state.get("query_analysis", {})
+        category = analysis.get("category", "기타")
+        
+        print(f"⚖️  [판례 검색] 대법원 판례 웹 검색 중...")
+        
+        # Tavily API 키 확인
+        tavily_api_key = os.getenv("TAVILY_API_KEY")
+        if not tavily_api_key:
+            print(f"⚠️  [판례 검색 스킵] TAVILY_API_KEY가 설정되지 않았습니다.")
+            return {"case_law_results": []}
+        
+        try:
+            # Tavily 검색 도구 설정
+            search_tool = TavilySearchResults(
+                max_results=3,
+                search_depth="advanced",
+                include_answer=True,
+                include_raw_content=False
+            )
+            
+            # 판례 검색 쿼리 최적화
+            search_query = f"대법원 판례 {category} {query}"
+            
+            # 검색 실행
+            results = search_tool.invoke({"query": search_query})
+            
+            if results:
+                case_laws = []
+                for r in results:
+                    case_laws.append({
+                        "title": r.get("title", ""),
+                        "url": r.get("url", ""),
+                        "content": r.get("content", "")[:500]  # 내용 제한
+                    })
+                print(f"✅ [판례 검색 완료] {len(case_laws)}건 발견")
+                return {"case_law_results": case_laws}
+            else:
+                print(f"⚠️  [판례 검색] 관련 판례를 찾지 못했습니다.")
+                return {"case_law_results": []}
+                
+        except Exception as e:
+            print(f"⚠️  [판례 검색 오류] {e}")
+            return {"case_law_results": []}
+    
+    return search_case_law
+
+
 def create_generate_node(llm: ChatOpenAI):
-    """노드 3: 답변 생성"""
+    """노드 5: 최종 답변 생성"""
     
     answer_prompt = ChatPromptTemplate.from_messages([
         ("system", """당신은 법률 전문 AI 어시스턴트 'A-TEAM 봇'입니다.
 
 역할:
-- 검색된 법률 문서를 바탕으로 정확하고 친절하게 답변합니다.
+- 검색된 법률 문서와 판례를 바탕으로 정확하고 친절하게 답변합니다.
 - 법령명, 조항, 판례번호 등 구체적인 근거를 제시합니다.
 - 법률 용어는 쉽게 풀어서 설명합니다.
 
-답변 작성 시:
-1. 검색된 자료만을 근거로 답변하세요.
-2. 답변은 구조화하여 작성하세요 (결론 → 근거 → 추가 설명).
-3. 관련 법령과 조항을 명시하세요.
-4. 확실하지 않은 내용은 추측하지 마세요.
-5. 한국어로 답변하세요."""),
-        ("human", """질문 카테고리: {classification}
+답변 작성 규칙:
+1. 검색된 자료를 근거로 답변하세요.
+2. 답변 구조: 📌 결론 → 📖 법적 근거 → 💡 추가 설명
+3. 관련 법령과 조항을 [법령명 제X조]처럼 명시하세요.
+4. 판례가 있으면 [대법원 XXXX. X. X. 선고 XXX다XXXX 판결] 형식으로 인용하세요.
+5. 확실하지 않은 내용은 "~로 해석될 수 있습니다" 등으로 신중하게 표현하세요.
+6. 전문 법률 상담이 필요한 경우 안내하세요.
+7. 한국어로 답변하세요."""),
+        ("human", """질문 분야: {category}
 
 사용자 질문: {query}
 
-검색된 관련 문서:
+📚 검색된 법령/문서:
 {context}
+
+⚖️ 관련 판례 (웹 검색):
+{case_law}
 
 위 자료를 바탕으로 질문에 답변해주세요.""")
     ])
     
     def generate_answer(state: AgentState) -> AgentState:
-        """답변 생성 노드"""
+        """답변 생성 노드: 검색 결과와 판례를 종합하여 답변 생성"""
         query = state["user_query"]
-        classification = state.get("query_classification", "기타")
+        analysis = state.get("query_analysis", {})
+        category = analysis.get("category", "기타")
         docs = state.get("retrieved_docs", [])
+        case_laws = state.get("case_law_results", [])
         
         print(f"💬 [답변 생성 중...]")
         
-        if not docs:
-            answer = "죄송합니다. 관련된 법률 정보를 찾을 수 없습니다. 질문을 더 구체적으로 작성해주시거나, 다른 방식으로 질문해주세요."
-        else:
-            # 문서를 컨텍스트로 포맷팅
+        # 문서 컨텍스트 포맷팅
+        if docs:
             context_parts = []
             for i, doc in enumerate(docs, 1):
                 metadata = doc.metadata
-                source = metadata.get("source", "unknown")
-                title = metadata.get("title", "")
-                content = doc.page_content[:1000]  # 문서당 최대 1000자
+                source = metadata.get("source", "")
+                law_name = metadata.get("law_name", "")
+                article = metadata.get("article_no", "")
+                title = metadata.get("article_title", "") or metadata.get("title", "")
+                content = doc.page_content[:800]
                 
-                context_parts.append(f"[문서 {i}] {source} - {title}\n{content}\n")
+                header = f"[문서 {i}]"
+                if law_name:
+                    header += f" {law_name}"
+                    if article:
+                        header += f" 제{article}조"
+                if title:
+                    header += f" - {title}"
+                
+                context_parts.append(f"{header}\n{content}\n")
             
             context = "\n".join(context_parts)
-            
+        else:
+            context = "(관련 법령 문서가 검색되지 않았습니다)"
+        
+        # 판례 컨텍스트 포맷팅
+        if case_laws:
+            case_parts = []
+            for i, case in enumerate(case_laws, 1):
+                case_parts.append(f"[판례 {i}] {case.get('title', '')}\n{case.get('content', '')}\n출처: {case.get('url', '')}\n")
+            case_law_context = "\n".join(case_parts)
+        else:
+            case_law_context = "(관련 판례 정보 없음)"
+        
+        # 검색 결과가 전혀 없는 경우
+        if not docs and not case_laws:
+            answer = """죄송합니다. 질문과 관련된 법률 정보를 찾지 못했습니다.
+
+다음과 같이 시도해 보시겠어요?
+1. 질문을 더 구체적으로 작성해 주세요 (예: 상황, 관련 법령 등)
+2. 다른 키워드로 질문해 보세요
+3. 복잡한 사안의 경우 전문 법률 상담을 권장드립니다."""
+        else:
             # LLM으로 답변 생성
             chain = answer_prompt | llm
             response = chain.invoke({
-                "classification": classification,
+                "category": category,
                 "query": query,
-                "context": context
+                "context": context,
+                "case_law": case_law_context
             })
             answer = response.content
         
@@ -204,113 +323,37 @@ def create_generate_node(llm: ChatOpenAI):
     return generate_answer
 
 
-def create_validation_node(llm: ChatOpenAI):
-    """노드 4: 검증"""
-    
-    validation_prompt = ChatPromptTemplate.from_messages([
-        ("system", """당신은 법률 답변의 품질을 검증하는 전문가입니다.
-
-답변을 평가하여 다음 기준을 확인하세요:
-1. 검색된 문서를 근거로 답변했는가?
-2. 법령명이나 조항 등 구체적인 근거가 있는가?
-3. 질문에 직접적으로 답변했는가?
-4. 답변이 충분히 상세한가?
-
-검증 결과를 JSON 형식으로 반환하세요:
-{
-  "valid": true/false,
-  "feedback": "검증 결과에 대한 피드백"
-}"""),
-        ("human", """사용자 질문: {query}
-
-검색된 문서 개수: {doc_count}
-
-생성된 답변:
-{answer}
-
-위 답변을 검증해주세요.""")
-    ])
-    
-    def validate_answer(state: AgentState) -> AgentState:
-        """답변 검증 노드"""
-        query = state["user_query"]
-        answer = state.get("generated_answer", "")
-        docs = state.get("retrieved_docs", [])
-        
-        print(f"🔍 [답변 검증 중...]")
-        
-        # 기본 검증: 답변이 너무 짧거나 검색 결과가 없으면 실패
-        if len(answer) < 50 or not docs:
-            print(f"❌ [검증 실패] 답변이 불충분합니다.")
-            return {
-                "validation_result": False,
-                "validation_feedback": "답변이 너무 짧거나 검색 결과가 없습니다."
-            }
-        
-        # LLM으로 검증
-        chain = validation_prompt | llm
-        response = chain.invoke({
-            "query": query,
-            "doc_count": len(docs),
-            "answer": answer
-        })
-        
-        # 응답 파싱 (간단하게 "valid": true/false 찾기)
-        content = response.content.lower()
-        is_valid = "true" in content or "통과" in content or "적절" in content
-        
-        if is_valid:
-            print(f"✅ [검증 통과]")
-        else:
-            print(f"⚠️  [검증 실패] 재시도가 필요할 수 있습니다.")
-        
-        return {
-            "validation_result": is_valid,
-            "validation_feedback": response.content
-        }
-    
-    return validate_answer
-
-
-def create_retry_decision_node():
-    """노드 5: 재시도 판단"""
-    
-    def decide_retry(state: AgentState) -> AgentState:
-        """재시도 판단 노드"""
-        retry_count = state.get("retry_count", 0)
-        validation_result = state.get("validation_result", False)
-        
-        if not validation_result and retry_count < 2:  # 최대 2번 재시도
-            new_retry_count = retry_count + 1
-            print(f"🔄 [재시도 {new_retry_count}/2] 검색을 다시 시도합니다.")
-            return {"retry_count": new_retry_count}
-        elif not validation_result:
-            print(f"⚠️  [재시도 제한 도달] 현재 답변을 반환합니다.")
-        
-        return {"retry_count": retry_count}
-    
-    return decide_retry
-
-
 # ===========================
-# 조건부 엣지 함수
+# 라우팅 함수 (조건부 분기)
 # ===========================
-def should_retry(state: AgentState) -> str:
-    """검증 후 재시도 여부 결정"""
-    validation_result = state.get("validation_result", False)
-    retry_count = state.get("retry_count", 0)
+
+def route_after_analysis(state: AgentState) -> Literal["clarify", "search"]:
+    """분석 후 라우팅: 명확화 필요 여부에 따라 분기"""
+    analysis = state.get("query_analysis", {})
+    needs_clarification = analysis.get("needs_clarification", False)
     
-    if not validation_result and retry_count < 2:
-        return "retry"  # 재시도 노드로
+    if needs_clarification:
+        return "clarify"
     else:
-        return "end"  # 종료
+        return "search"
+
+
+def route_after_search(state: AgentState) -> Literal["case_law_search", "generate"]:
+    """검색 후 라우팅: 판례 필요 여부에 따라 분기"""
+    analysis = state.get("query_analysis", {})
+    needs_case_law = analysis.get("needs_case_law", False)
+    
+    if needs_case_law:
+        return "case_law_search"
+    else:
+        return "generate"
 
 
 # ===========================
 # 사전 준비 영역: 리소스 초기화
 # ===========================
 def initialize_resources():
-    """임베딩 모델, 벡터스토어, Retriever, Tools 초기화"""
+    """임베딩 모델, 벡터스토어 초기화"""
     
     # 1. 환경 변수 로드
     COLLECTION_NAME = os.getenv("QDRANT_COLLECTION_NAME")
@@ -354,24 +397,9 @@ def initialize_resources():
     )
     print("✅ 벡터스토어 초기화 완료")
     
-    # 5. Retriever 생성 (사용 안 할 수도 있지만 준비)
-    print(f"\n🔍 Retriever 생성 중...")
-    retriever = vectorstore.as_retriever(
-        search_type="similarity",
-        search_kwargs={"k": 5}
-    )
-    print("✅ Retriever 생성 완료")
-    
-    # 6. 검색 함수 생성
-    print(f"\n🛠️  검색 함수 생성 중...")
-    search_function = create_search_function(vectorstore)
-    print("✅ 검색 함수 생성 완료")
-    
     return {
         "embeddings": embeddings,
-        "vectorstore": vectorstore,
-        "retriever": retriever,
-        "search_function": search_function
+        "vectorstore": vectorstore
     }
 
 
@@ -379,11 +407,11 @@ def initialize_resources():
 # LangGraph 초기화
 # ===========================
 def initialize_langgraph_chatbot():
-    """LangGraph 기반 RAG 챗봇 초기화"""
+    """LangGraph 기반 RAG 챗봇 초기화 (조건부 분기 포함)"""
     
     # 사전 준비: 리소스 초기화
     resources = initialize_resources()
-    search_function = resources["search_function"]
+    vectorstore = resources["vectorstore"]
     
     # LLM 설정
     print(f"\n🤖 LLM 설정 중...")
@@ -396,40 +424,55 @@ def initialize_langgraph_chatbot():
     
     # 노드 생성
     print(f"\n⚙️  LangGraph 노드 생성 중...")
-    classify_node = create_classify_node(llm)
-    search_node = create_search_node(search_function)
+    analyze_node = create_analyze_query_node(llm)
+    clarify_node = create_clarify_node(llm)
+    search_node = create_search_node(vectorstore)
+    case_law_node = create_case_law_search_node(llm)
     generate_node = create_generate_node(llm)
-    validation_node = create_validation_node(llm)
-    retry_node = create_retry_decision_node()
-    print("✅ 노드 생성 완료")
+    print("✅ 노드 생성 완료 (5개)")
     
     # StateGraph 구성
     print(f"\n🔗 LangGraph 워크플로우 구성 중...")
     workflow = StateGraph(AgentState)
     
     # 노드 추가
-    workflow.add_node("classify", classify_node)
+    workflow.add_node("analyze", analyze_node)
+    workflow.add_node("clarify", clarify_node)
     workflow.add_node("search", search_node)
+    workflow.add_node("case_law_search", case_law_node)
     workflow.add_node("generate", generate_node)
-    workflow.add_node("validate", validation_node)
-    workflow.add_node("retry_decision", retry_node)
     
     # 엣지 추가
-    workflow.set_entry_point("classify")
-    workflow.add_edge("classify", "search")
-    workflow.add_edge("search", "generate")
-    workflow.add_edge("generate", "validate")
+    workflow.set_entry_point("analyze")
     
-    # 조건부 엣지: 검증 후 재시도 또는 종료
+    # 조건부 분기 1: 분석 후 → 명확화 필요? → clarify / search
     workflow.add_conditional_edges(
-        "validate",
-        should_retry,
+        "analyze",
+        route_after_analysis,
         {
-            "retry": "retry_decision",
-            "end": END
+            "clarify": "clarify",
+            "search": "search"
         }
     )
-    workflow.add_edge("retry_decision", "search")
+    
+    # clarify는 바로 종료
+    workflow.add_edge("clarify", END)
+    
+    # 조건부 분기 2: 검색 후 → 판례 필요? → case_law_search / generate
+    workflow.add_conditional_edges(
+        "search",
+        route_after_search,
+        {
+            "case_law_search": "case_law_search",
+            "generate": "generate"
+        }
+    )
+    
+    # 판례 검색 후 → 답변 생성
+    workflow.add_edge("case_law_search", "generate")
+    
+    # 답변 생성 후 → 종료
+    workflow.add_edge("generate", END)
     
     # 그래프 컴파일
     graph = workflow.compile()
@@ -450,6 +493,11 @@ def main():
         print("💡 .env 파일에 OPENAI_API_KEY를 추가하세요.")
         return
     
+    # Tavily API Key 확인 (경고만)
+    if not os.getenv("TAVILY_API_KEY"):
+        print("⚠️  경고: TAVILY_API_KEY가 설정되지 않았습니다.")
+        print("   판례 웹 검색 기능이 비활성화됩니다.\n")
+    
     try:
         # 챗봇 초기화
         print("\n" + "="*60)
@@ -462,11 +510,14 @@ def main():
         print("✅ 🤖 A-TEAM 법률 챗봇 준비 완료!")
         print("="*60)
         print("\n💡 사용 방법:")
-        print("  - 노동분야 법률, 형사법, 민사법 관련 질문에 응답할 수 있습니다.")
+        print("  - 노동법, 형사법, 민사법 관련 질문에 응답합니다.")
+        print("  - 판례가 필요하면 자동으로 웹 검색합니다.")
+        print("  - 질문이 모호하면 구체화를 요청합니다.")
         print("  - 'exit', 'quit', '종료'를 입력하면 종료됩니다")
         print("\n📊 워크플로우:")
-        print("  1. 질문 분류 → 2. 검색 실행 → 3. 답변 생성")
-        print("  → 4. 검증 → 5. 재시도 판단 (필요시)")
+        print("  ┌─ 질문 분석 ─┬─ [모호함] → 명확화 요청 → 종료")
+        print("  │            └─ [명확함] → 법령 검색 ─┬─ [판례 필요] → 판례 검색 → 답변 생성")
+        print("  │                                     └─ [불필요] → 답변 생성")
         print("="*60 + "\n")
         
         # 대화 루프
@@ -489,18 +540,17 @@ def main():
                 initial_state = {
                     "messages": [HumanMessage(content=user_input)],
                     "user_query": user_input,
-                    "query_classification": None,
+                    "query_analysis": None,
                     "retrieved_docs": None,
+                    "case_law_results": None,
                     "generated_answer": None,
-                    "validation_result": None,
-                    "validation_feedback": None,
-                    "retry_count": 0
+                    "next_action": None
                 }
                 
                 # 그래프 실행
-                print("\n" + "="*60)
+                print("\n" + "-"*60)
                 print("🔄 워크플로우 실행 중...")
-                print("="*60 + "\n")
+                print("-"*60 + "\n")
                 
                 result = graph.invoke(initial_state)
                 
