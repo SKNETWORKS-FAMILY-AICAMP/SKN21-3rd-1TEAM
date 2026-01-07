@@ -302,8 +302,8 @@ def main():
     parser.add_argument(
         '--model',
         type=str,
-        default='gpt-5-mini',
-        help='사용할 LLM 모델 (기본값: gpt-5-mini)'
+        default='gpt-4o-mini',
+        help='사용할 LLM 모델 (기본값: gpt-4o-mini)'
     )
     parser.add_argument(
         '--output',

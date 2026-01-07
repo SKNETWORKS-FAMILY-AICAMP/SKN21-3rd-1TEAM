@@ -1,0 +1,249 @@
+[
+  {
+    "user_input":"근로자에 대한 고용보험법의 목적은 뭐예요?",
+    "reference_contexts":[
+      "[고용보험법] 제1조(목적)\n\n제1조(목적) 이 법은 고용보험의 시행을 통하여 실업의 예방, 고용의 촉진 및 근로자 등의 직업능력의 개발과 향상을 꾀하고, 국가의 직업지도와 직업소개 기능을 강화하며, 근로자 등이 실업한 경우에 생활에 필요한 급여를 실시하여 근로자 등의 생활안정과 구직 활동을 촉진함으로써 경제ㆍ사회 발전에 이바지하는 것을 목적으로 한다."
+    ],
+    "reference":"고용보험법의 목적은 근로자 등의 직업능력 개발과 향상, 실업 예방, 고용 촉진, 그리고 근로자가 실업했을 때 생활에 필요한 급여를 실시하여 생활안정과 구직 활동을 촉진하는 것입니다.",
+    "persona_name":"Employment Benefits Advisor",
+    "query_style":"POOR_GRAMMAR",
+    "query_length":"MEDIUM",
+    "synthesizer_name":"single_hop_specific_query_synthesizer"
+  },
+  {
+    "user_input":"이직이 뭐예요?",
+    "reference_contexts":[
+      "[고용보험법] 제2조(정의)\n\n제2조(정의) 이 법에서 사용하는 용어의 뜻은 다음과 같다. \n\n1. “피보험자”란 다음 각 목에 해당하는 사람을 말한다.\n\n가. 「고용보험 및 산업재해보상보험의 보험료징수 등에 관한 법률」(이하 “고용산재보험료징수법”이라 한다) 제5조제1항ㆍ제2항, 제6조제1항, 제8조제1항ㆍ제2항, 제48조의2제1항 및 제48조의3제1항에 따라 보험에 가입되거나 가입된 것으로 보는 근로자, 예술인 또는 노무제공자\n\n나. 고용산재보험료징수법 제49조의2제1항ㆍ제2항에 따라 고용보험에 가입하거나 가입된 것으로 보는 자영업자(이하 “자영업자인 피보험자”라 한다)\n\n2. “이직(離職)”이란 피보험자와 사업주 사이의 고용관계가 끝나게 되는 것(제77조의2제1항에 따른 예술인 및 제77조의6제1항에 따른 노무제공자의 경우에는 문화예술용역 관련 계약 또는 노무제공계약이 끝나는 것을 말한다)을 말한다.\n\n3."
+    ],
+    "reference":"이직이란 피보험자와 사업주 사이의 고용관계가 끝나게 되는 것을 말합니다.",
+    "persona_name":"Employment Support Advisor",
+    "query_style":"POOR_GRAMMAR",
+    "query_length":"SHORT",
+    "synthesizer_name":"single_hop_specific_query_synthesizer"
+  },
+  {
+    "user_input":"직업안정기관이란 뭐고, 그 역할은 뭐야? 그리고 실업의 인정이랑 어떻게 관련이 있어?",
+    "reference_contexts":[
+      "[고용보험법] 제2조(정의)\n\n[이어짐 2\/2]\n나게 되는 것(제77조의2제1항에 따른 예술인 및 제77조의6제1항에 따른 노무제공자의 경우에는 문화예술용역 관련 계약 또는 노무제공계약이 끝나는 것을 말한다)을 말한다.\n\n3. “실업”이란 근로의 의사와 능력이 있음에도 불구하고 취업하지 못한 상태에 있는 것을 말한다.\n\n4. “실업의 인정”이란 직업안정기관의 장이 제43조에 따른 수급자격자가 실업한 상태에서 적극적으로 직업을 구하기 위하여 노력하고 있다고 인정하는 것을 말한다.\n\n5. “보수”란 「소득세법」 제20조에 따른 근로소득에서 대통령령으로 정하는 금품을 뺀 금액을 말한다. 다만, 휴직이나 그 밖에 이와 비슷한 상태에 있는 기간 중에 사업주 외의 자로부터 지급받는 금품 중 고용노동부장관이 정하여 고시하는 금품은 보수로 본다.\n\n6. “일용근로자”란 1개월 미만 동안 고용되는 사람을 말한다."
+    ],
+    "reference":"직업안정기관은 실업의 인정과 관련이 있으며, 이 기관의 장이 수급자격자가 실업한 상태에서 적극적으로 직업을 구하기 위해 노력하고 있다고 인정하는 역할을 합니다.",
+    "persona_name":"Employment Benefits Advisor",
+    "query_style":"POOR_GRAMMAR",
+    "query_length":"LONG",
+    "synthesizer_name":"single_hop_specific_query_synthesizer"
+  },
+  {
+    "user_input":"고용보험법은 누가 관장하나요?",
+    "reference_contexts":[
+      "[고용보험법] 제3조(보험의 관장)\n\n제3조(보험의 관장) 고용보험(이하 “보험”이라 한다)은 고용노동부장관이 관장한다."
+    ],
+    "reference":"고용보험은 고용노동부장관이 관장한다.",
+    "persona_name":"Employment Policy Analyst",
+    "query_style":"POOR_GRAMMAR",
+    "query_length":"MEDIUM",
+    "synthesizer_name":"single_hop_specific_query_synthesizer"
+  },
+  {
+    "user_input":"What does 육아휴직 급여 refer to in the context of employment insurance?",
+    "reference_contexts":[
+      "[고용보험법] 제4조(고용보험사업)\n\n제4조(고용보험사업) ①보험은 제1조의 목적을 이루기 위하여 고용보험사업(이하 “보험사업”이라 한다)으로 고용안정ㆍ직업능력개발 사업, 실업급여, 육아휴직 급여 및 출산전후휴가 급여 등을 실시한다. \n\n②보험사업의 보험연도는 정부의 회계연도에 따른다."
+    ],
+    "reference":"육아휴직 급여 refers to a benefit provided under the employment insurance system, which is part of the insurance business aimed at achieving employment stability and supporting various aspects such as job skills development and unemployment benefits.",
+    "persona_name":"Employment Policy Analyst",
+    "query_style":"PERFECT_GRAMMAR",
+    "query_length":"SHORT",
+    "synthesizer_name":"single_hop_specific_query_synthesizer"
+  },
+  {
+    "user_input":"What financial responsibilities does the government have under the 고용보험법?",
+    "reference_contexts":[
+      "[고용보험법] 제5조(국고의 부담)\n\n제5조(국고의 부담) ①국가는 매년 보험사업에 드는 비용의 일부를 일반회계에서 부담하여야 한다. \n\n②국가는 매년 예산의 범위에서 보험사업의 관리ㆍ운영에 드는 비용을 부담할 수 있다."
+    ],
+    "reference":"Under the 고용보험법, the government is responsible for covering a portion of the costs incurred by the insurance business from the general account each year. Additionally, the government may bear the costs associated with the management and operation of the insurance business within the limits of the annual budget.",
+    "persona_name":"Employment Benefits Advisor",
+    "query_style":"PERFECT_GRAMMAR",
+    "query_length":"MEDIUM",
+    "synthesizer_name":"single_hop_specific_query_synthesizer"
+  },
+  {
+    "user_input":"How does the insurance premium related to 직업능력개발 contribute to employment stability according to the Employment Insurance Act?",
+    "reference_contexts":[
+      "[고용보험법] 제6조(보험료)\n\n제6조(보험료) ①이 법에 따른 보험사업에 드는 비용을 충당하기 위하여 징수하는 보험료와 그 밖의 징수금에 대하여는 고용산재보험료징수법으로 정하는 바에 따른다. \n\n②고용산재보험료징수법 제13조제1항제1호에 따라 징수된 고용안정ㆍ직업능력개발 사업의 보험료 및 실업급여의 보험료는 각각 그 사업에 드는 비용에 충당한다. 다만, 실업급여의 보험료는 제55조의2제1항에 따른 국민연금 보험료의 지원, 제70조제1항에 따른 육아휴직 급여의 지급, 제73조의2제1항에 따른 육아기 근로시간 단축 급여의 지급, 제75조ㆍ제76조의2에 따른 출산전후휴가 급여등 및 제77조의4ㆍ제77조의9에 따른 출산전후급여등의 지급에 드는 비용에 충당할 수 있다."
+    ],
+    "reference":"According to Article 6 of the Employment Insurance Act, the insurance premium collected for employment stability and 직업능력개발 projects is used to cover the costs associated with these programs. This ensures that the funds are allocated to support job creation and assist unemployed workers in finding new opportunities.",
+    "persona_name":"Employment Policy Analyst",
+    "query_style":"WEB_SEARCH_LIKE",
+    "query_length":"LONG",
+    "synthesizer_name":"single_hop_specific_query_synthesizer"
+  },
+  {
+    "user_input":"고용보험법 제60조에 따르면, 직업안정기관의 장이 소개하는 직업을 거부할 경우 구직급여 지급이 정지될 수 있는데, 고용보험위원회는 이러한 사항에 대해 어떤 역할을 하나요?",
+    "reference_contexts":[
+      "<1-hop>\n\n[고용보험법] 제60조(훈련 거부 등에 따른 급여의 지급 제한)\n\n제60조(훈련 거부 등에 따른 급여의 지급 제한) ①수급자격자가 직업안정기관의 장이 소개하는 직업에 취직하는 것을 거부하거나 직업안정기관의 장이 지시한 직업능력개발 훈련 등을 거부하면 대통령령으로 정하는 바에 따라 구직급여의 지급을 정지한다. 다만, 다음 각 호의 어느 하나에 해당하는 정당한 사유가 있는 경우에는 그러하지 아니하다. \n\n1. 소개된 직업 또는 직업능력개발 훈련 등을 받도록 지시된 직종이 수급자격자의 능력에 맞지 아니하는 경우\n\n2. 취직하거나 직업능력개발 훈련 등을 받기 위하여 주거의 이전이 필요하나 그 이전이 곤란한 경우\n\n3. 소개된 직업의 임금 수준이 같은 지역의 같은 종류의 업무 또는 같은 정도의 기능에 대한 통상의 임금 수준에 비하여 100분의 20 이상 낮은 경우 등 고용노동부장관이 정하는 기준에 해당하는 경우\n\n4.",
+      "<2-hop>\n\n[고용보험법] 제7조(고용보험위원회)\n\n[이어짐 2\/3]\n에 따른 보험료율의 결정에 관한 사항\n\n3. 제11조의2에 따른 보험사업의 평가에 관한 사항\n\n4. 제81조에 따른 기금운용 계획의 수립 및 기금의 운용 결과에 관한 사항\n\n5. 그 밖에 위원장이 보험제도 및 보험사업과 관련하여 위원회의 심의가 필요하다고 인정하는 사항\n\n③ 위원회는 위원장 1명을 포함한 20명 이내의 위원으로 구성한다.\n\n④ 위원회의 위원장은 고용노동부차관이 되고, 위원은 다음 각 호의 사람 중에서 각각 같은 수(數)로 고용노동부장관이 임명하거나 위촉하는 사람이 된다. \n\n1. 근로자를 대표하는 사람\n\n2. 사용자를 대표하는 사람\n\n3. 공익을 대표하는 사람\n\n4.",
+      "<3-hop>\n\n[고용보험법] 제6조(보험료)\n\n제6조(보험료) ①이 법에 따른 보험사업에 드는 비용을 충당하기 위하여 징수하는 보험료와 그 밖의 징수금에 대하여는 고용산재보험료징수법으로 정하는 바에 따른다. \n\n②고용산재보험료징수법 제13조제1항제1호에 따라 징수된 고용안정ㆍ직업능력개발 사업의 보험료 및 실업급여의 보험료는 각각 그 사업에 드는 비용에 충당한다. 다만, 실업급여의 보험료는 제55조의2제1항에 따른 국민연금 보험료의 지원, 제70조제1항에 따른 육아휴직 급여의 지급, 제73조의2제1항에 따른 육아기 근로시간 단축 급여의 지급, 제75조ㆍ제76조의2에 따른 출산전후휴가 급여등 및 제77조의4ㆍ제77조의9에 따른 출산전후급여등의 지급에 드는 비용에 충당할 수 있다."
+    ],
+    "reference":"고용보험법 제60조에 따르면, 수급자격자가 직업안정기관의 장이 소개하는 직업에 취직하는 것을 거부하면 구직급여의 지급이 정지될 수 있습니다. 이와 관련하여 고용보험위원회는 보험료율의 결정, 보험사업의 평가, 기금운용 계획의 수립 등 다양한 사항을 심의하는 역할을 합니다. 위원회는 고용노동부차관이 위원장이 되고, 근로자, 사용자, 공익을 대표하는 사람들로 구성되어 있습니다.",
+    "persona_name":null,
+    "query_style":null,
+    "query_length":null,
+    "synthesizer_name":"multi_hop_abstract_query_synthesizer"
+  },
+  {
+    "user_input":"What are the eligibility requirements for receiving 구직급여 under the 고용보험법, and how does the 피보험 단위기간 affect this eligibility?",
+    "reference_contexts":[
+      "<1-hop>\n\n[고용보험법] 제43조(수급자격의 인정)\n\n[이어짐 2\/3]\n이직 당시 일용근로자로서 피보험 단위기간이 1개월 미만인 사람이 수급자격을 갖추지 못한 경우에는 일용근로자가 아닌 근로자로서 마지막으로 이직한 사업을 기준으로 결정한다. \n\n1. 피보험자로서 마지막에 이직한 사업에 고용되기 전에 피보험자로서 이직한 사실이 있을 것\n\n2. 마지막 이직 이전의 이직과 관련하여 구직급여를 받은 사실이 없을 것\n\n④ 직업안정기관의 장은 제2항 및 제3항에 따라 신청인에 대한 수급자격의 인정 여부를 결정하기 위하여 필요하면 신청인이 이직하기 전 사업의 사업주에게 고용노동부령으로 정하는 바에 따라 이직확인서의 제출을 요청할 수 있다. 이 경우 요청을 받은 사업주는 고용노동부령으로 정하는 바에 따라 이직확인서를 제출하여야 한다.",
+      "<2-hop>\n\n[고용보험법] 제40조(구직급여의 수급 요건)\n\n[이어짐 3\/4]\n에 따라 국가데이터처장이 고시하는 한국표준산업분류의 대분류상 건설업에 종사한 사람을 말한다. 이하 같다)로서 수급자격 인정신청일 이전 14일간 연속하여 근로내역이 없을 것\n\n6. 최종 이직 당시의 기준기간 동안의 피보험 단위기간 중 다른 사업에서 제58조에 따른 수급자격의 제한 사유에 해당하는 사유로 이직한 사실이 있는 경우에는 그 피보험 단위기간 중 90일 이상을 일용근로자로 근로하였을 것\n\n② 기준기간은 이직일 이전 18개월로 하되, 근로자인 피보험자가 다음 각 호의 어느 하나에 해당하는 경우에는 다음 각 호의 구분에 따른 기간을 기준기간으로 한다. \n\n1.",
+      "<3-hop>\n\n[고용보험법] 제41조(피보험 단위기간)\n\n제41조(피보험 단위기간) ①근로자의 피보험 단위기간은 피보험기간 중 보수 지급의 기초가 된 날을 합하여 계산한다. 다만, 자영업자인 피보험자의 피보험 단위기간은 제50조제3항 단서 및 제4항에 따른 피보험기간으로 한다. \n\n②제1항에 따라 피보험 단위기간을 계산할 때에는 최후로 피보험자격을 취득한 날 이전에 구직급여를 받은 사실이 있는 경우에는 그 구직급여와 관련된 피보험자격 상실일 이전의 피보험 단위기간은 넣지 아니한다. \n\n③ 근로자인 피보험자가 제40조제2항에 따른 기준기간 동안에 근로자ㆍ제77조의2제1항에 따른 예술인ㆍ제77조의6제1항에 따른 노무제공자 중 둘 이상에 해당하는 사람으로 종사한 경우의 피보험 단위기간은 대통령령으로 정하는 바에 따른다."
+    ],
+    "reference":"Under the 고용보험법, the eligibility requirements for receiving 구직급여 include having no work history for 14 consecutive days prior to the application date and having a sufficient 피보험 단위기간. Specifically, the 피보험 단위기간 is calculated based on the days for which wages were paid during the insured period. If a worker has previously received 구직급여, the days related to that benefit are not included in the calculation of the 피보험 단위기간. Additionally, if a worker has transitioned from another business during the 기준기간, they must have worked as an insured worker for at least 90 days to qualify.",
+    "persona_name":null,
+    "query_style":null,
+    "query_length":null,
+    "synthesizer_name":"multi_hop_abstract_query_synthesizer"
+  },
+  {
+    "user_input":"What are the provisions regarding job seeker benefits and the calculation of unemployment benefits under the 고용보험법?",
+    "reference_contexts":[
+      "<1-hop>\n\n[고용보험법] 제62조(반환명령 등)\n\n[이어짐 3\/3]\n가 있으면 그 지급금의 반환을 명할 수 있다.\n\n⑤ 직업안정기관의 장은 제1항ㆍ제2항 또는 제4항에 따라 구직급여 지급금을 반환하거나 추가징수금을 납부하여야 하는 사람이 이 법에 따라 지급받을 구직급여가 있는 경우에는 이를 대통령령으로 정하는 바에 따라 제1항ㆍ제2항 또는 제4항에 따른 반환금ㆍ추가징수금에 충당할 수 있다.\n\n[전문개정 2019. 8. 27.]",
+      "<2-hop>\n\n[고용보험법] 제6조(보험료)\n\n제6조(보험료) ①이 법에 따른 보험사업에 드는 비용을 충당하기 위하여 징수하는 보험료와 그 밖의 징수금에 대하여는 고용산재보험료징수법으로 정하는 바에 따른다. \n\n②고용산재보험료징수법 제13조제1항제1호에 따라 징수된 고용안정ㆍ직업능력개발 사업의 보험료 및 실업급여의 보험료는 각각 그 사업에 드는 비용에 충당한다. 다만, 실업급여의 보험료는 제55조의2제1항에 따른 국민연금 보험료의 지원, 제70조제1항에 따른 육아휴직 급여의 지급, 제73조의2제1항에 따른 육아기 근로시간 단축 급여의 지급, 제75조ㆍ제76조의2에 따른 출산전후휴가 급여등 및 제77조의4ㆍ제77조의9에 따른 출산전후급여등의 지급에 드는 비용에 충당할 수 있다.",
+      "<3-hop>\n\n[고용보험법] 제46조(구직급여일액)\n\n제46조(구직급여일액) ①구직급여일액은 다음 각 호의 구분에 따른 금액으로 한다. \n\n1. 제45조제1항부터 제3항까지 및 제5항의 경우에는 그 수급자격자의 기초일액에 100분의 60을 곱한 금액\n\n2. 제45조제4항의 경우에는 그 수급자격자의 기초일액에 100분의 80을 곱한 금액(이하 “최저구직급여일액”이라 한다)\n\n②제1항제1호에 따라 산정된 구직급여일액이 최저구직급여일액보다 낮은 경우에는 최저구직급여일액을 그 수급자격자의 구직급여일액으로 한다."
+    ],
+    "reference":"Under the 고용보험법, job seeker benefits are addressed in several provisions. Specifically, Article 46 outlines the daily amount of unemployment benefits, which is calculated based on the recipient's basic amount multiplied by a percentage (60% or 80% depending on the circumstances). Additionally, Article 62 states that if a person is required to return benefits or pay additional charges, they can offset these amounts against any unemployment benefits they are entitled to receive, as determined by presidential decree.",
+    "persona_name":null,
+    "query_style":null,
+    "query_length":null,
+    "synthesizer_name":"multi_hop_abstract_query_synthesizer"
+  },
+  {
+    "user_input":"고용보험법에 따르면 피보험자격을 취득하기 위한 기준은 무엇이며, 피보험기간의 합산은 어떤 경우에 적용되나요?",
+    "reference_contexts":[
+      "<1-hop>\n\n[고용보험법] 제50조(소정급여일수 및 피보험기간)\n\n[이어짐 3\/5]\n서의 피보험기간을 합산한다. 다만, 종전의 적용 사업의 피보험자격 상실로 인하여 구직급여를 지급받은 사실이 있는 경우에는 그 종전의 적용 사업에서의 피보험기간은 제외한다.\n\n2. 자영업자인 피보험자가 종전에 근로자로서 고용되었다가 피보험자격을 상실한 사실이 있고 그 상실한 날부터 3년 이내에 자영업자로서 피보험자격을 다시 취득한 경우: 종전의 적용 사업에서의 피보험기간을 합산하지 아니하되, 본인이 종전의 피보험기간을 합산하여 줄 것을 원하는 때에 한정하여 합산한다.",
+      "<2-hop>\n\n[고용보험법] 제18조(피보험자격의 취득기준)\n\n제18조(피보험자격의 취득기준) ① 제2조제1호가목에 따른 근로자가 보험관계가 성립되어 있는 둘 이상의 사업에 동시에 고용되어 있는 경우에는 대통령령으로 정하는 바에 따라 그 중 한 사업의 피보험자격을 취득한다.\n\n② 제2조제1호가목 및 나목에 동시에 해당하는 사람은 같은 호 가목에 따른 근로자, 예술인 또는 노무제공자로서의 피보험자격을 취득한다. 다만, 제2조제1호가목에 따른 피보험자가 다음 각 호의 어느 하나에 해당하는 사람인 경우에는 같은 호 가목 및 나목의 피보험자격 중 하나를 선택하여 피보험자격을 취득하거나 유지한다.\n\n1. 일용근로자\n\n2. 제77조의2제2항제2호 단서에 따른 단기예술인\n\n3.",
+      "<3-hop>\n\n[고용보험법] 제50조(소정급여일수 및 피보험기간)\n\n[이어짐 2\/5]\n서 같다)으로 한다. 다만, 자영업자인 피보험자의 경우에는 그 수급자격과 관련된 폐업 당시의 적용 사업에의 보험가입기간 중에서 실제로 납부한 고용보험료에 해당하는 기간으로 한다. \n\n④ 제3항에도 불구하고 피보험기간을 계산할 때에 다음 각 호의 경우에는 해당 호에 따라 각각 피보험기간을 계산한다. \n\n1. 종전의 적용 사업에서 피보험자격을 상실한 사실이 있고 그 상실한 날부터 3년 이내에 현재 적용 사업에서 피보험자격을 취득한 경우: 종전의 적용 사업에서의 피보험기간을 합산한다. 다만, 종전의 적용 사업의 피보험자격 상실로 인하여 구직급여를 지급받은 사실이 있는 경우에는 그 종전의 적용 사업에서의 피보험기간은 제외한다.\n\n2."
+    ],
+    "reference":"고용보험법 제18조에 따르면 피보험자격을 취득하기 위한 기준은 근로자가 보험관계가 성립되어 있는 둘 이상의 사업에 동시에 고용되어 있는 경우, 대통령령으로 정하는 바에 따라 그 중 한 사업의 피보험자격을 취득하는 것입니다. 또한, 피보험기간의 합산은 제50조에 명시된 바와 같이, 종전의 적용 사업에서 피보험자격을 상실한 사실이 있고 그 상실한 날부터 3년 이내에 현재 적용 사업에서 피보험자격을 취득한 경우에 적용됩니다. 그러나 종전의 적용 사업에서 구직급여를 지급받은 사실이 있는 경우에는 그 종전의 피보험기간은 제외됩니다.",
+    "persona_name":null,
+    "query_style":null,
+    "query_length":null,
+    "synthesizer_name":"multi_hop_abstract_query_synthesizer"
+  },
+  {
+    "user_input":"고용보험법에 따라 사업주가 직업능력개발 훈련을 실시할 때 어떤 지원을 받을 수 있고, 이러한 지원이 고용조정에 어떻게 도움이 되는지 설명해 주세요.",
+    "reference_contexts":[
+      "<1-hop>\n\n[고용보험법] 제27조(사업주에 대한 직업능력개발 훈련의 지원)\n\n제27조(사업주에 대한 직업능력개발 훈련의 지원) ① 고용노동부장관은 피보험자등의 직업능력을 개발ㆍ향상시키기 위하여 대통령령으로 정하는 직업능력개발 훈련을 실시하는 사업주에게 대통령령으로 정하는 바에 따라 그 훈련에 필요한 비용을 지원할 수 있다. \n\n② 고용노동부장관은 사업주가 다음 각 호의 어느 하나에 해당하는 사람에게 제1항에 따라 직업능력개발 훈련을 실시하는 경우에는 대통령령으로 정하는 바에 따라 우대 지원할 수 있다. \n\n1. 「기간제 및 단시간근로자 보호 등에 관한 법률」 제2조제1호의 기간제근로자\n\n2. 「근로기준법」 제2조제1항제9호의 단시간근로자\n\n3. 「파견근로자 보호 등에 관한 법률」 제2조제5호의 파견근로자\n\n4. 일용근로자\n\n5. 「고용상 연령차별금지 및 고령자고용촉진에 관한 법률」 제2조제1호 또는 제2호의 고령자 또는 준고령자\n\n6. 그 밖에 대통령령으로 정하는 사람",
+      "<2-hop>\n\n[고용보험법] 제31조(직업능력개발의 촉진)\n\n제31조(직업능력개발의 촉진) ①고용노동부장관은 피보험자등의 직업능력 개발ㆍ향상을 촉진하기 위하여 다음 각 호의 사업을 실시하거나 이를 실시하는 자에게 그 사업의 실시에 필요한 비용을 지원할 수 있다. \n\n1. 직업능력개발 사업에 대한 기술지원 및 평가 사업\n\n2. 자격검정 사업 및 「숙련기술장려법」 에 따른 숙련기술 장려 사업\n\n3. 그 밖에 대통령령으로 정하는 사업\n\n②고용노동부장관은 직업능력 개발ㆍ향상과 인력의 원활한 수급(需給)을 위하여 필요하다고 인정하면 대통령령으로 정하는 바에 따라 고용노동부장관이 정하는 직종에 대한 직업능력개발 훈련 사업을 위탁하여 실시할 수 있다.",
+      "<3-hop>\n\n[고용보험법] 제21조(고용조정의 지원)\n\n제21조(고용조정의 지원) ①고용노동부장관은 경기의 변동, 산업구조의 변화 등에 따른 사업 규모의 축소, 사업의 폐업 또는 전환으로 고용조정이 불가피하게 된 사업주가 근로자에 대한 휴업이나 휴직 등 근로를 제공하지 아니하도록 하는 조치, 직업전환에 필요한 직업능력개발 훈련, 인력의 재배치 등을 실시하거나 그 밖에 근로자의 고용안정을 위한 조치를 하면 대통령령으로 정하는 바에 따라 그 사업주에게 필요한 지원을 할 수 있다. 이 경우 사업주가 근로자에게 지급하는 금품이 근로자의 고용안정을 위한 조치로 인하여 대통령령으로 정하는 수준으로 감소할 때에는 대통령령으로 정하는 바에 따라 그 근로자에게도 필요한 지원을 할 수 있다."
+    ],
+    "reference":"고용보험법 제27조에 따르면, 고용노동부장관은 피보험자 등의 직업능력을 개발하고 향상시키기 위해 직업능력개발 훈련을 실시하는 사업주에게 필요한 비용을 지원할 수 있습니다. 특히, 특정 조건을 충족하는 근로자에게 훈련을 실시하는 경우에는 우대 지원이 가능합니다. 또한, 제31조에서는 직업능력개발을 촉진하기 위해 기술지원 및 평가 사업, 자격검정 사업 등을 실시하거나 이에 필요한 비용을 지원할 수 있다고 명시하고 있습니다. 이러한 지원은 제21조에 따라 경기 변동이나 산업구조 변화로 인한 고용조정 시 사업주가 근로자에게 직업전환에 필요한 직업능력개발 훈련을 실시할 수 있도록 도와주며, 근로자의 고용안정을 위한 조치를 취할 수 있게 합니다.",
+    "persona_name":null,
+    "query_style":null,
+    "query_length":null,
+    "synthesizer_name":"multi_hop_abstract_query_synthesizer"
+  },
+  {
+    "user_input":"고용보험법에 따라 직업능력개발 훈련 시설에 대한 지원은 어떻게 이루어지며, 사업주가 직업능력개발 훈련을 실시할 경우 어떤 조건이 필요한가요?",
+    "reference_contexts":[
+      "<1-hop>\n\n[고용보험법] 제27조(사업주에 대한 직업능력개발 훈련의 지원)\n\n제27조(사업주에 대한 직업능력개발 훈련의 지원) ① 고용노동부장관은 피보험자등의 직업능력을 개발ㆍ향상시키기 위하여 대통령령으로 정하는 직업능력개발 훈련을 실시하는 사업주에게 대통령령으로 정하는 바에 따라 그 훈련에 필요한 비용을 지원할 수 있다. \n\n② 고용노동부장관은 사업주가 다음 각 호의 어느 하나에 해당하는 사람에게 제1항에 따라 직업능력개발 훈련을 실시하는 경우에는 대통령령으로 정하는 바에 따라 우대 지원할 수 있다. \n\n1. 「기간제 및 단시간근로자 보호 등에 관한 법률」 제2조제1호의 기간제근로자\n\n2. 「근로기준법」 제2조제1항제9호의 단시간근로자\n\n3. 「파견근로자 보호 등에 관한 법률」 제2조제5호의 파견근로자\n\n4. 일용근로자\n\n5. 「고용상 연령차별금지 및 고령자고용촉진에 관한 법률」 제2조제1호 또는 제2호의 고령자 또는 준고령자\n\n6. 그 밖에 대통령령으로 정하는 사람",
+      "<2-hop>\n\n[고용보험법] 제30조(직업능력개발 훈련 시설에 대한 지원 등)\n\n제30조(직업능력개발 훈련 시설에 대한 지원 등) 고용노동부장관은 피보험자등의 직업능력 개발ㆍ향상을 위하여 필요하다고 인정하면 대통령령으로 정하는 바에 따라 직업능력개발 훈련 시설의 설치 및 장비 구입에 필요한 비용의 대부, 그 밖에 고용노동부장관이 정하는 직업능력개발 훈련 시설의 설치 및 장비 구입ㆍ운영에 필요한 비용을 지원할 수 있다.",
+      "<3-hop>\n\n[고용보험법] 제32조(건설근로자 등의 직업능력개발 지원)\n\n제32조(건설근로자 등의 직업능력개발 지원) ①고용노동부장관은 건설근로자 등 고용상태가 불안정한 근로자를 위하여 직업능력 개발ㆍ향상을 위한 사업으로 대통령령으로 정하는 사업을 실시하는 사업주에게 그 사업의 실시에 필요한 비용을 지원할 수 있다. \n\n②고용노동부장관은 제1항의 사업과 관련하여 사업주가 단독으로 직업능력개발 사업을 실시하기 어려운 경우로서 대통령령으로 정하는 경우에는 사업주 단체에 대하여도 지원할 수 있다."
+    ],
+    "reference":"고용보험법 제30조에 따르면, 고용노동부장관은 피보험자 등의 직업능력 개발 및 향상을 위해 필요하다고 인정할 경우, 직업능력개발 훈련 시설의 설치 및 장비 구입에 필요한 비용을 지원할 수 있습니다. 또한, 제27조에 따르면 사업주가 직업능력개발 훈련을 실시할 경우, 특정 조건을 충족하는 근로자에게 우대 지원을 받을 수 있습니다. 이러한 조건에는 기간제 근로자, 단시간 근로자, 파견 근로자, 일용 근로자, 고령자 등이 포함됩니다.",
+    "persona_name":null,
+    "query_style":null,
+    "query_length":null,
+    "synthesizer_name":"multi_hop_abstract_query_synthesizer"
+  },
+  {
+    "user_input":"실업이란 뭐고, 고용보험법에서 어떻게 정의되나?",
+    "reference_contexts":[
+      "<1-hop>\n\n[고용보험법] 제6조(보험료)\n\n제6조(보험료) ①이 법에 따른 보험사업에 드는 비용을 충당하기 위하여 징수하는 보험료와 그 밖의 징수금에 대하여는 고용산재보험료징수법으로 정하는 바에 따른다. \n\n②고용산재보험료징수법 제13조제1항제1호에 따라 징수된 고용안정ㆍ직업능력개발 사업의 보험료 및 실업급여의 보험료는 각각 그 사업에 드는 비용에 충당한다. 다만, 실업급여의 보험료는 제55조의2제1항에 따른 국민연금 보험료의 지원, 제70조제1항에 따른 육아휴직 급여의 지급, 제73조의2제1항에 따른 육아기 근로시간 단축 급여의 지급, 제75조ㆍ제76조의2에 따른 출산전후휴가 급여등 및 제77조의4ㆍ제77조의9에 따른 출산전후급여등의 지급에 드는 비용에 충당할 수 있다.",
+      "<2-hop>\n\n[고용보험법] 제2조(정의)\n\n[이어짐 2\/2]\n나게 되는 것(제77조의2제1항에 따른 예술인 및 제77조의6제1항에 따른 노무제공자의 경우에는 문화예술용역 관련 계약 또는 노무제공계약이 끝나는 것을 말한다)을 말한다.\n\n3. “실업”이란 근로의 의사와 능력이 있음에도 불구하고 취업하지 못한 상태에 있는 것을 말한다.\n\n4. “실업의 인정”이란 직업안정기관의 장이 제43조에 따른 수급자격자가 실업한 상태에서 적극적으로 직업을 구하기 위하여 노력하고 있다고 인정하는 것을 말한다.\n\n5. “보수”란 「소득세법」 제20조에 따른 근로소득에서 대통령령으로 정하는 금품을 뺀 금액을 말한다. 다만, 휴직이나 그 밖에 이와 비슷한 상태에 있는 기간 중에 사업주 외의 자로부터 지급받는 금품 중 고용노동부장관이 정하여 고시하는 금품은 보수로 본다.\n\n6. “일용근로자”란 1개월 미만 동안 고용되는 사람을 말한다.",
+      "<3-hop>\n\n[고용보험법] 제2조(정의)\n\n제2조(정의) 이 법에서 사용하는 용어의 뜻은 다음과 같다. \n\n1. “피보험자”란 다음 각 목에 해당하는 사람을 말한다.\n\n가. 「고용보험 및 산업재해보상보험의 보험료징수 등에 관한 법률」(이하 “고용산재보험료징수법”이라 한다) 제5조제1항ㆍ제2항, 제6조제1항, 제8조제1항ㆍ제2항, 제48조의2제1항 및 제48조의3제1항에 따라 보험에 가입되거나 가입된 것으로 보는 근로자, 예술인 또는 노무제공자\n\n나. 고용산재보험료징수법 제49조의2제1항ㆍ제2항에 따라 고용보험에 가입하거나 가입된 것으로 보는 자영업자(이하 “자영업자인 피보험자”라 한다)\n\n2. “이직(離職)”이란 피보험자와 사업주 사이의 고용관계가 끝나게 되는 것(제77조의2제1항에 따른 예술인 및 제77조의6제1항에 따른 노무제공자의 경우에는 문화예술용역 관련 계약 또는 노무제공계약이 끝나는 것을 말한다)을 말한다.\n\n3."
+    ],
+    "reference":"실업이란 근로의 의사와 능력이 있음에도 불구하고 취업하지 못한 상태에 있는 것을 말한다. 고용보험법 제2조에서는 실업의 정의와 함께 실업의 인정에 대해서도 설명하고 있으며, 직업안정기관의 장이 수급자격자가 실업한 상태에서 적극적으로 직업을 구하기 위해 노력하고 있다고 인정하는 것을 실업의 인정이라고 한다.",
+    "persona_name":null,
+    "query_style":null,
+    "query_length":null,
+    "synthesizer_name":"multi_hop_abstract_query_synthesizer"
+  },
+  {
+    "user_input":"What are the criteria for acquiring insured status under Article 18 of the Employment Insurance Act, particularly for daily workers and short-term artists?",
+    "reference_contexts":[
+      "<1-hop>\n\n[고용보험법] 제18조(피보험자격의 취득기준)\n\n[이어짐 2\/2]\n경우에는 같은 호 가목 및 나목의 피보험자격 중 하나를 선택하여 피보험자격을 취득하거나 유지한다.\n\n1. 일용근로자\n\n2. 제77조의2제2항제2호 단서에 따른 단기예술인\n\n3. 제77조의6제2항제2호 단서에 따른 단기노무제공자\n\n③ 제2항에도 불구하고 제2조제1호가목 및 나목에 동시에 해당하는 사람은 본인 의사에 따라 같은 호 가목 및 나목에 따른 피보험자격 모두를 취득하거나 유지할 수 있다.\n\n④ 제2조제1호가목에 따른 예술인 또는 노무제공자가 보험관계가 성립되어 있는 둘 이상의 사업에서 동시에 노무를 제공하거나 근로를 제공하는 경우에는 대통령령으로 정하는 바에 따라 피보험자격을 취득한다.\n\n[전문개정 2022. 12. 31.]"
+    ],
+    "reference":"Under Article 18 of the Employment Insurance Act, the criteria for acquiring insured status include provisions for daily workers and short-term artists. Specifically, individuals can choose to acquire or maintain insured status based on their eligibility as daily workers or as short-term artists as defined in Article 77, Section 2, Clause 2. Additionally, individuals who meet the criteria for both categories can acquire or maintain insured status according to their preference. Furthermore, if an artist or labor provider is simultaneously providing labor or services in multiple businesses where an insurance relationship is established, they can acquire insured status as prescribed by presidential decree.",
+    "persona_name":null,
+    "query_style":null,
+    "query_length":null,
+    "synthesizer_name":"multi_hop_specific_query_synthesizer"
+  },
+  {
+    "user_input":"What are the objectives of the employment stability and vocational skills development projects as outlined in Article 19 of the Employment Insurance Act?",
+    "reference_contexts":[
+      "<1-hop>\n\n[고용보험법] 제19조(고용안정ㆍ직업능력개발 사업의 실시)\n\n제19조(고용안정ㆍ직업능력개발 사업의 실시) ①고용노동부장관은 피보험자 및 피보험자였던 사람, 그 밖에 취업할 의사를 가진 사람(이하 “피보험자등”이라 한다)에 대한 실업의 예방, 취업의 촉진, 고용기회의 확대, 직업능력개발ㆍ향상의 기회 제공 및 지원, 그 밖에 고용안정과 사업주에 대한 인력 확보를 지원하기 위하여 고용안정ㆍ직업능력개발 사업을 실시한다. \n\n②고용노동부장관은 제1항에 따른 고용안정ㆍ직업능력개발 사업을 실시할 때에는 근로자의 수, 고용안정ㆍ직업능력개발을 위하여 취한 조치 및 실적 등 대통령령으로 정하는 기준에 해당하는 기업(이하 “우선지원 대상기업”이라 한다)을 우선적으로 고려하여야 한다."
+    ],
+    "reference":"The objectives of the employment stability and vocational skills development projects, as outlined in Article 19 of the Employment Insurance Act, include the prevention of unemployment, promotion of employment, expansion of employment opportunities, provision and support for opportunities to develop and enhance vocational skills, and support for employment stability and securing personnel for business owners.",
+    "persona_name":null,
+    "query_style":null,
+    "query_length":null,
+    "synthesizer_name":"multi_hop_specific_query_synthesizer"
+  },
+  {
+    "user_input":"What is the basis for calculating the daily amount of unemployment benefits according to Article 45, and how does it relate to Article 2 of the Labor Standards Act?",
+    "reference_contexts":[
+      "<1-hop>\n\n[고용보험법] 제45조(급여의 기초가 되는 임금일액)\n\n제45조(급여의 기초가 되는 임금일액) ①구직급여의 산정 기초가 되는 임금일액[이하 “기초일액(基礎日額)”이라 한다]은 제43조제1항에 따른 수급자격의 인정과 관련된 마지막 이직 당시 「근로기준법」 제2조제1항제6호에 따라 산정된 평균임금으로 한다. 다만, 마지막 이직일 이전 3개월 이내에 피보험자격을 취득한 사실이 2회 이상인 경우에는 마지막 이직일 이전 3개월간(일용근로자의 경우에는 마지막 이직일 이전 4개월 중 최종 1개월을 제외한 기간)에 그 근로자에게 지급된 임금 총액을 그 산정의 기준이 되는 3개월의 총 일수로 나눈 금액을 기초일액으로 한다.\n\n②제1항에 따라 산정된 금액이 「근로기준법」에 따른 그 근로자의 통상임금보다 적을 경우에는 그 통상임금액을 기초일액으로 한다. 다만, 마지막 사업에서 이직 당시 일용근로자였던 사람의 경우에는 그러하지 아니하다."
+    ],
+    "reference":"The basis for calculating the daily amount of unemployment benefits, as stated in Article 45, is the average wage determined under Article 2, Paragraph 1, Item 6 of the Labor Standards Act, related to the last job separation. If the calculated amount is less than the regular wage of the worker according to the Labor Standards Act, then the regular wage amount is used as the basis for the daily amount. However, this does not apply to those who were daily workers at the time of their last job separation.",
+    "persona_name":null,
+    "query_style":null,
+    "query_length":null,
+    "synthesizer_name":"multi_hop_specific_query_synthesizer"
+  },
+  {
+    "user_input":"What does Article 7 of the Employment Insurance Act state regarding the establishment of insurance relationships for self-employed insured persons?",
+    "reference_contexts":[
+      "<1-hop>\n\n[고용보험법] 제13조(피보험자격의 취득일)\n\n제13조(피보험자격의 취득일) ①근로자인 피보험자는 이 법이 적용되는 사업에 고용된 날에 피보험자격을 취득한다. 다만, 다음 각 호의 경우에는 각각 그 해당되는 날에 피보험자격을 취득한 것으로 본다. \n\n1. 제10조 및 제10조의2에 따른 적용 제외 근로자였던 사람이 이 법의 적용을 받게 된 경우에는 그 적용을 받게 된 날\n\n2. 고용산재보험료징수법 제7조에 따른 보험관계 성립일 전에 고용된 근로자의 경우에는 그 보험관계가 성립한 날\n\n② 자영업자인 피보험자는 고용산재보험료징수법 제49조의2제1항 및 같은 조 제12항에서 준용하는 같은 법 제7조제3호에 따라 보험관계가 성립한 날에 피보험자격을 취득한다."
+    ],
+    "reference":"Article 7 of the Employment Insurance Act states that self-employed insured persons acquire insurance eligibility on the day their insurance relationship is established, as per the provisions of Article 49-2(1) and Article 12 of the same law, which applies Article 7(3) accordingly.",
+    "persona_name":null,
+    "query_style":null,
+    "query_length":null,
+    "synthesizer_name":"multi_hop_specific_query_synthesizer"
+  },
+  {
+    "user_input":"What does 제37조의2제1항 say about the protection of unemployment benefits and how does it relate to the provisions in 제38조 regarding the rights to unemployment benefits?",
+    "reference_contexts":[
+      "<1-hop>\n\n[고용보험법] 제38조(수급권의 보호)\n\n제38조(수급권의 보호) ① 실업급여를 받을 권리는 양도 또는 압류하거나 담보로 제공할 수 없다. \n\n② 제37조의2제1항에 따라 지정된 실업급여수급계좌의 예금 중 대통령령으로 정하는 액수 이하의 금액에 관한 채권은 압류할 수 없다."
+    ],
+    "reference":"제37조의2제1항 specifies that certain accounts designated for unemployment benefits cannot be subjected to seizure or collateralization. This relates to 제38조, which states that the right to receive unemployment benefits cannot be transferred or seized, ensuring that individuals maintain access to their benefits without the risk of losing them due to financial claims.",
+    "persona_name":null,
+    "query_style":null,
+    "query_length":null,
+    "synthesizer_name":"multi_hop_specific_query_synthesizer"
+  },
+  {
+    "user_input":"자영업자가 구직급여를 받기 위해 선택할 수 있는 피보험자격의 기준은 무엇이며, 소정급여일수와 피보험기간은 어떻게 결정되나요?",
+    "reference_contexts":[
+      "<1-hop>\n\n[고용보험법] 제43조의2(둘 이상의 피보험자격 취득 시 수급자격의 인정)\n\n제43조의2(둘 이상의 피보험자격 취득 시 수급자격의 인정) ① 근로자, 제77조의2제1항에 따른 예술인, 제77조의6제1항에 따른 노무제공자 또는 자영업자인 피보험자로서 서로 다른 둘 이상의 피보험자격을 취득하였다가 이직하여 그 피보험자격을 모두 상실한 사람이 구직급여를 지급받으려는 경우에는 둘 이상의 피보험자격 중 자신이 선택한 피보험자격을 기준으로 수급자격의 인정 여부를 결정한다.\n\n② 제1항에 따라 수급자격을 인정받으려는 사람이 선택한 피보험자격이 가장 나중에 상실한 피보험자격(피보험자격을 동시에 상실한 경우에는 동시에 상실된 피보험자격 모두를 말한다. 이하 이 항에서 같다)이 아닌 경우에는 가장 나중에 상실한 피보험자격과 관련된 이직사유가 제58조 또는 제69조의7에 따른 수급자격의 제한 사유에 해당하지 아니하는 경우에만 수급자격을 인정한다.",
+      "<2-hop>\n\n[고용보험법] 제50조(소정급여일수 및 피보험기간)\n\n제50조(소정급여일수 및 피보험기간) ①하나의 수급자격에 따라 구직급여를 지급받을 수 있는 날(이하 “소정급여일수”라 한다)은 대기기간이 끝난 다음날부터 계산하기 시작하여 피보험기간과 연령에 따라 별표 1에서 정한 일수가 되는 날까지로 한다. \n\n②수급자격자가 소정급여일수 내에 제48조제2항에 따른 임신ㆍ출산ㆍ육아, 그 밖에 대통령령으로 정하는 사유로 수급기간을 연장한 경우에는 그 기간만큼 구직급여를 유예하여 지급한다.\n\n③피보험기간은 그 수급자격과 관련된 이직 당시의 적용 사업에서 고용된 기간(제10조 및 제10조의2에 따른 적용 제외 근로자로 고용된 기간은 제외한다. 이하 이 조에서 같다)으로 한다. 다만, 자영업자인 피보험자의 경우에는 그 수급자격과 관련된 폐업 당시의 적용 사업에의 보험가입기간 중에서 실제로 납부한 고용보험료에 해당하는 기간으로 한다."
+    ],
+    "reference":"자영업자가 구직급여를 받기 위해 선택할 수 있는 피보험자격의 기준은 서로 다른 둘 이상의 피보험자격 중 자신이 선택한 피보험자격을 기준으로 수급자격의 인정 여부가 결정됩니다. 또한, 소정급여일수는 대기기간이 끝난 다음날부터 계산하기 시작하여 피보험기간과 연령에 따라 정해진 일수가 되는 날까지입니다. 자영업자인 피보험자의 경우, 피보험기간은 그 수급자격과 관련된 폐업 당시의 적용 사업에의 보험가입기간 중에서 실제로 납부한 고용보험료에 해당하는 기간으로 결정됩니다.",
+    "persona_name":null,
+    "query_style":null,
+    "query_length":null,
+    "synthesizer_name":"multi_hop_specific_query_synthesizer"
+  },
+  {
+    "user_input":"고용보험법에서 직업능력개발 사업은 어떤 역할을 하나요?",
+    "reference_contexts":[
+      "<1-hop>\n\n[고용보험법] 제4조(고용보험사업)\n\n제4조(고용보험사업) ①보험은 제1조의 목적을 이루기 위하여 고용보험사업(이하 “보험사업”이라 한다)으로 고용안정ㆍ직업능력개발 사업, 실업급여, 육아휴직 급여 및 출산전후휴가 급여 등을 실시한다. \n\n②보험사업의 보험연도는 정부의 회계연도에 따른다.",
+      "<2-hop>\n\n[고용보험법] 제11조(보험 관련 조사ㆍ연구)\n\n제11조(보험 관련 조사ㆍ연구) ①고용노동부장관은 노동시장ㆍ직업 및 직업능력개발에 관한 연구와 보험 관련 업무를 지원하기 위한 조사ㆍ연구 사업 등을 할 수 있다. \n\n②고용노동부장관은 필요하다고 인정하면 제1항에 따른 업무의 일부를 대통령령으로 정하는 자에게 대행하게 할 수 있다."
+    ],
+    "reference":"고용보험법 제4조에 따르면, 직업능력개발 사업은 고용안정과 함께 보험사업의 목적을 이루기 위해 실시되는 중요한 사업입니다. 또한, 제11조에서는 고용노동부장관이 노동시장 및 직업과 관련된 연구를 통해 직업능력개발을 지원하기 위한 조사 및 연구 사업을 수행할 수 있다고 명시하고 있습니다.",
+    "persona_name":null,
+    "query_style":null,
+    "query_length":null,
+    "synthesizer_name":"multi_hop_specific_query_synthesizer"
+  }
+]

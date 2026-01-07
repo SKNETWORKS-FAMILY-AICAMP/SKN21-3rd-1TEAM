@@ -22,7 +22,7 @@ load_dotenv()
 # ============================================================
 SCRIPT_DIR = Path(__file__).parent
 DATA_DIR = SCRIPT_DIR / '..' / 'data'
-PROCESSED_FILE = DATA_DIR / 'processed' / 'law_chunks.json'
+PROCESSED_FILE = DATA_DIR / 'processed' / 'fd_법령_chunked.json'
 
 EMBEDDING_MODEL = "Qwen/Qwen3-Embedding-0.6B"
 EMBEDDING_DIM = 1024
@@ -67,17 +67,18 @@ class LegalVectorDB:
         )
         print(f"✨ 컬렉션 '{name}' 생성 완료")
 
-    def upsert_chunks(self, collection_name: str, chunks: List[Dict[str, Any]], batch_size: int = 32):
-        """청크 업서트 (배치 처리)"""
+    def upsert_chunks(self, collection_name: str, chunks: List[Dict[str, Any]], batch_size: int = 16, start_id: int = 0):
+        """청크 업서트 (배치 처리 + 재시도 로직)"""
+        import time
+        from qdrant_client.http.exceptions import UnexpectedResponse
+
         if not chunks:
             print("❌ 업로드할 청크가 없습니다.")
             return
 
         total = len(chunks)
-        print(f"🚀 총 {total}개 청크 업로드 시작...")
-
-        # 포인트 ID 생성을 위한 오프셋 (기존 데이터와 충돌 방지 필요시 조정)
-        start_id = 0
+        print(
+            f"🚀 총 {total}개 청크 업로드 시작 (Batch Size: {batch_size}, Start ID: {start_id})...")
 
         for i in range(0, total, batch_size):
             batch = chunks[i: i + batch_size]
@@ -89,7 +90,6 @@ class LegalVectorDB:
 
             points = []
             for idx, (chunk, vector) in enumerate(zip(batch, embeddings)):
-                # 메타데이터에 텍스트 포함 (페이로드 저장용)
                 payload = chunk['metadata'].copy()
                 payload['text'] = chunk['text']
 
@@ -99,7 +99,24 @@ class LegalVectorDB:
                     payload=payload
                 ))
 
-            self.client.upsert(collection_name=collection_name, points=points)
+            # 재시도 로직 (최대 3회)
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    self.client.upsert(
+                        collection_name=collection_name, points=points)
+                    break
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        wait = (attempt + 1) * 2
+                        print(
+                            f"\n⚠️  업로드 실패 (시도 {attempt+1}/{max_retries}): {e}")
+                        print(f"⏳ {wait}초 후 재시도...")
+                        time.sleep(wait)
+                    else:
+                        print(f"\n❌ 최종 실패: {e}")
+                        raise e
+
             print(
                 f"\r📥 저장 중: {i + len(batch)}/{total} ({(i + len(batch))/total*100:.1f}%)", end='', flush=True)
 
@@ -143,10 +160,32 @@ def main():
         db = LegalVectorDB(url=url, api_key=key)
 
     # 3. 업로드
-    # 주의: recreate=True로 하면 기존 데이터 날라감. 필요시 False로 변경.
-    # 하지만 Clean 구축을 위해 True 유지 (사용자 의도에 따라 조정 가능)
-    db.create_collection(COLLECTION_NAME, recreate=True)
-    db.upsert_chunks(COLLECTION_NAME, chunks)
+    # 기존 데이터 확인
+    try:
+        current_count = db.client.count(collection_name=COLLECTION_NAME).count
+        print(f"📊 현재 컬렉션 데이터 수: {current_count}개")
+    except:
+        current_count = 0
+        print("⚠️ 컬렉션이 없거나 비어있습니다.")
+
+    if current_count > 0:
+        print(f"🔄 이어하기 모드: {current_count}번 인덱스부터 시작합니다.")
+        # recreate=False로 설정하여 기존 데이터 유지
+        db.create_collection(COLLECTION_NAME, recreate=False)
+
+        # 이미 업로드된 분량만큼 건너뛰고 나머지 업로드
+        if current_count < len(chunks):
+            remaining_chunks = chunks[current_count:]
+            # start_id를 current_count로 설정하여 ID 충돌 방지
+            db.upsert_chunks(COLLECTION_NAME, remaining_chunks,
+                             start_id=current_count)
+        else:
+            print("✅ 이미 모든 데이터가 업로드되어 있습니다.")
+    else:
+        # 처음부터 시작
+        print("🚀 새로운 업로드 시작")
+        db.create_collection(COLLECTION_NAME, recreate=True)
+        db.upsert_chunks(COLLECTION_NAME, chunks, start_id=0)
 
     # 4. 검증
     print("\n🔍 검색 테스트: '퇴직금 중간정산'")
