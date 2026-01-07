@@ -28,6 +28,11 @@ from dotenv import load_dotenv
 
 # .env 파일에서 환경변수 로드
 load_dotenv()
+
+# LangSmith 트레이싱 명시적 비활성화 (토큰 절약)
+os.environ["LANGCHAIN_TRACING_V2"] = "false"
+os.environ["LANGCHAIN_TRACING"] = "false"
+
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 

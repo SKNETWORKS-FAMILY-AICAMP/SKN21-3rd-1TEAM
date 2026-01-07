@@ -1,5 +1,5 @@
 """
-법령 외 데이터(판례, 행정해석) 전처리 및 Qdrant 업로드 스크립트
+법령 외 데이터(주요판정사례, 행정해석) 전처리 및 Qdrant 업로드 스크립트
 """
 import json
 import re
@@ -25,15 +25,15 @@ def clean_text(text: str) -> str:
 
 def load_case_law_data(file_path: Path) -> Tuple[List[str], List[Dict]]:
     """
-    주요판례 데이터 로드 및 전처리
+    주요주요판정사례 데이터 로드 및 전처리
 
     Args:
-        file_path: rd_주요판례.json 파일 경로
+        file_path: rd_주요주요판정사례.json 파일 경로
 
     Returns:
         (documents, metadatas) 튜플
     """
-    print(f"\n📂 판례 데이터 로드 중: {file_path.name}")
+    print(f"\n📂 주요판정사례 데이터 로드 중: {file_path.name}")
 
     with open(file_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
@@ -41,7 +41,7 @@ def load_case_law_data(file_path: Path) -> Tuple[List[str], List[Dict]]:
     documents = []
     metadatas = []
 
-    for item in tqdm(data, desc="판례 전처리"):
+    for item in tqdm(data, desc="주요판정사례 전처리"):
         제목 = item.get('제목', '').strip()
         판정사항 = clean_text(item.get('판정사항', ''))
         판정요지 = clean_text(item.get('판정요지', ''))
@@ -50,8 +50,8 @@ def load_case_law_data(file_path: Path) -> Tuple[List[str], List[Dict]]:
         if not (판정사항 or 판정요지):
             continue
 
-        # 텍스트 구성: [판례: 제목]\n판정사항\n판정요지
-        text_parts = [f"[판례: {제목}]"]
+        # 텍스트 구성: [주요판정사례: 제목]\n판정사항\n판정요지
+        text_parts = [f"[주요판정사례: {제목}]"]
 
         if 판정사항:
             text_parts.append(f"판정사항: {판정사항}")
@@ -73,7 +73,7 @@ def load_case_law_data(file_path: Path) -> Tuple[List[str], List[Dict]]:
             'doc_length': len(text)
         })
 
-    print(f"✅ 판례 {len(documents)}개 문서 전처리 완료")
+    print(f"✅ 주요판정사례 {len(documents)}개 문서 전처리 완료")
     return documents, metadatas
 
 
@@ -333,7 +333,7 @@ def main():
     """메인 실행 함수"""
 
     print("\n" + "="*60)
-    print("📝 판례·행정해석 데이터 전처리")
+    print("📝 주요판정사례·행정해석 데이터 전처리")
     print("="*60)
 
     # 경로 설정
@@ -352,13 +352,13 @@ def main():
     precedent_file = raw_dir / "rd_법령외_판정선례.json"
 
     # 출력 파일
-    case_law_output = processed_dir / "fd_법령외_판례.json"
+    case_law_output = processed_dir / "fd_법령외_주요판정사례.json"
     interpretation_output = processed_dir / "fd_법령외_행정해석.json"
     moel_qa_output = processed_dir / "fd_법령외_고용노동부QA.json"
     precedent_output = processed_dir / "fd_법령외_판정선례.json"
 
     # 데이터 로드 및 전처리
-    # 1. 판례 데이터
+    # 1. 주요판정사례 데이터
     if case_law_file.exists():
         case_docs, case_metas = load_case_law_data(case_law_file)
         save_preprocessed_data(case_docs, case_metas, case_law_output)
@@ -398,7 +398,7 @@ def main():
     print("="*60 + "\n")
 
     # 샘플 출력
-    print("📄 샘플 문서 (판례):")
+    print("📄 샘플 문서 (주요판정사례):")
     print("-"*60)
     print(case_docs[0][:500] + "..." if len(case_docs[0])
           > 500 else case_docs[0])
