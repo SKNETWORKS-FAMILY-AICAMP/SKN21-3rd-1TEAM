@@ -1,5 +1,5 @@
 """
-중앙부처 1차 해석 (판정선례) 크롤러 (2단계 전략 - 수정완료)
+중앙부처 1차 해석 (결정선례) 크롤러 (2단계 전략 - 수정완료)
 1단계: 전체 페이지(약 9000건/180페이지 추정) ID 전수 수집
 2단계: 수집된 ID 기반 상세정보 추출
 """
@@ -19,8 +19,8 @@ from playwright.sync_api import sync_playwright
 SCRIPT_DIR = Path(__file__).parent
 DATA_DIR = SCRIPT_DIR / '..' / 'data'
 RAW_DIR = DATA_DIR / 'raw'
-LIST_FILE = RAW_DIR / 'rd_법령외_판정선례_list.json'
-OUTPUT_FILE = RAW_DIR / 'rd_법령외_판정선례.json'
+LIST_FILE = RAW_DIR / 'rd_법령외_결정선례_list.json'
+OUTPUT_FILE = RAW_DIR / 'rd_법령외_결정선례.json'
 
 # 타겟 URL (중앙부처 1차 해석, 전체 부처)
 TARGET_URL = "https://www.law.go.kr/LSW/cgmExpcSc.do?menuId=11&subMenuId=729&tabMenuId=733&upperOfiClsCd=M&ofiClsCd=350101"
@@ -318,7 +318,7 @@ def crawl_details():
                     page_title = ""
                     try:
                         # 페이지 내 실제 제목 요소 (h4 등) 구조에 따라 수정 필요
-                        # 판정선례 페이지 구조상 #contentBody h3 또는 h4 등에 제목이 있을 수 있음
+                        # 결정선례 페이지 구조상 #contentBody h3 또는 h4 등에 제목이 있을 수 있음
                         # 여기서는 .tit_view 또는 input[name="title"] 등 확인 필요하지만
                         # 2단계 리스트에서 클릭 시, 본문 상단 타이틀이 바뀌는지 확인.
 
