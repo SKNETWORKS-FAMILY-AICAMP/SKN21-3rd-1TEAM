@@ -107,7 +107,10 @@ def load_golden_dataset(path: str) -> pd.DataFrame:
 # ============================================================
 # LangGraph V1 모델 추론
 # ============================================================
-def run_inference(questions: List[str], verbose: bool = True) -> List[Dict[str, Any]]:
+# ============================================================
+# LangGraph V1 모델 추론
+# ============================================================
+def run_inference(questions: List[str], chatbot_version: str = "v3", verbose: bool = True) -> List[Dict[str, Any]]:
     """
     LangGraph V1 RAG 모델로 각 질문에 대한 답변을 생성합니다.
 
@@ -118,10 +121,18 @@ def run_inference(questions: List[str], verbose: bool = True) -> List[Dict[str, 
     Returns:
         List of {answer: str, contexts: List[str]}
     """
-    # chatbot_V1.py에서 LangGraph 챗봇 초기화 함수 임포트
-    from chatbot_V1 import initialize_langgraph_chatbot
+    # chatbot_V3.py에서 LangGraph 챗봇 초기화 함수 임포트
+    print(f"\n🤖 LangGraph 모델 초기화 중... (버전: {chatbot_version})")
 
-    print("\n🤖 LangGraph V1 모델 초기화 중...")
+    if chatbot_version.lower() == "v1":
+        from chatbot_V1 import initialize_langgraph_chatbot
+    elif chatbot_version.lower() == "v2":
+        from chatbot_V2 import initialize_langgraph_chatbot
+    elif chatbot_version.lower() == "v3":
+        from chatbot_V3 import initialize_langgraph_chatbot
+    else:
+        raise ValueError(f"지원하지 않는 챗봇 버전입니다: {chatbot_version}")
+
     graph = initialize_langgraph_chatbot()
     print("✅ 모델 초기화 완료\n")
 
@@ -162,7 +173,8 @@ def run_inference(questions: List[str], verbose: bool = True) -> List[Dict[str, 
                     source = metadata.get("source", "")
                     law_name = metadata.get("law_name", "")
                     article = metadata.get("article_no", "")
-                    title = metadata.get("article_title", "") or metadata.get("title", "")
+                    title = metadata.get(
+                        "article_title", "") or metadata.get("title", "")
                     content = doc.page_content.strip()
 
                     # 컨텍스트 포맷팅 (평가에 사용할 형태로)
@@ -336,7 +348,8 @@ def save_results(
 # 메인 함수
 # ============================================================
 def main():
-    parser = argparse.ArgumentParser(description='노동법 RAG 챗봇 평가 스크립트 (LangGraph V1)')
+    parser = argparse.ArgumentParser(
+        description='노동법 RAG 챗봇 평가 스크립트 (LangGraph V1)')
     parser.add_argument(
         '--golden-set',
         type=str,
@@ -365,6 +378,13 @@ def main():
         '--dry-run',
         action='store_true',
         help='데이터 로드만 테스트하고 종료'
+    )
+    parser.add_argument(
+        '--chatbot-version',
+        type=str,
+        default='v3',
+        choices=['v1', 'v2', 'v3'],
+        help='평가할 챗봇 버전 (v1, v2, v3)'
     )
     args = parser.parse_args()
 
@@ -396,8 +416,9 @@ def main():
     questions = df['user_input'].tolist()
     references = df['reference'].tolist()
 
-    print(f"\n📝 {len(questions)}개 질문에 대해 추론 시작...")
-    inference_results = run_inference(questions)
+    print(f"\n📝 {len(questions)}개 질문에 대해 추론 시작 (Chatbot {args.chatbot_version})...")
+    inference_results = run_inference(
+        questions, chatbot_version=args.chatbot_version)
 
     # 결과 추출
     answers = [r['answer'] for r in inference_results]
