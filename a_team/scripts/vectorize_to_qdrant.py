@@ -226,10 +226,10 @@ class LegalVectorDB:
         if url:
             # 클라우드 접속 (API Key 필수)
             print(f"Qdrant 클라우드 연결: {url}")
-            self.client = QdrantClient(url=url, api_key=api_key)
+            self.client = QdrantClient(url=url, api_key=api_key, timeout=60)
         elif host:
             # 로컬/서버 접속
-            self.client = QdrantClient(host=host, port=port)
+            self.client = QdrantClient(host=host, port=port, timeout=60)
             print(f"Qdrant 서버 연결: {host}:{port}")
         elif path:
             # 로컬 파일 모드
@@ -403,8 +403,17 @@ def main():
     print("법령/행정해석 Qdrant 벡터 DB 구축 (Docker 서버)")
     print("=" * 60)
 
-    # Docker 서버 연결
-    db = LegalVectorDB(host='localhost', port=6333)
+    # Qdrant 연결 (클라우드/로컬)
+    # 로컬 Docker 대신 Cloud URL 사용
+    cloud_url = "https://75daa0f4-de48-4954-857a-1fbc276e298f.us-east4-0.gcp.cloud.qdrant.io/"
+    api_key = os.getenv("QDRANT_API_KEY")
+
+    if cloud_url and api_key:
+        db = LegalVectorDB(url=cloud_url, api_key=api_key)
+    else:
+        # API 키 없으면 로컬로 폴백
+        print("⚠️ QDRANT_API_KEY가 없어 로컬 Docker로 연결합니다.")
+        db = LegalVectorDB(host='localhost', port=6333)
 
     # A-TEAM 컬렉션 생성 (단일 컬렉션에 모든 데이터)
     db.create_collection('A-TEAM', recreate=True)

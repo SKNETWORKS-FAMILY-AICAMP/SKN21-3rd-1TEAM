@@ -234,6 +234,7 @@ def load_documents(data_dir: str, sources: list = None) -> list:
         pass  # TXT 없으면 조용히 넘어감
 
     print(f"\n📄 총 {len(documents)}개 문서 로드 완료\n")
+    return documents
 
 # ---------------------------------------------------------
 # [수정] 온도를 강제로 1로 고정하는 커스텀 LLM 클래스
@@ -320,6 +321,7 @@ def generate_testset(
     testset = generator.generate_with_langchain_docs(
         documents=documents,
         testset_size=test_size,
+        raise_exceptions=False,
     )
 
     # DataFrame으로 변환
@@ -342,8 +344,8 @@ def main():
     parser.add_argument(
         '--data-dir',
         type=str,
-        default='./data',
-        help='PDF/TXT 문서가 있는 폴더 경로 (기본값: ./data)'
+        default='../data',
+        help='PDF/TXT 문서가 있는 폴더 경로 (기본값: ../data)'
     )
     parser.add_argument(
         '--test-size',
@@ -360,7 +362,7 @@ def main():
     parser.add_argument(
         '--model',
         type=str,
-        default='gpt-5-mini',
+        default='gpt-5.2',
         help='사용할 LLM 모델 (기본값: gpt-5.2)'
     )
     parser.add_argument(
