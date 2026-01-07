@@ -40,24 +40,24 @@ EMBEDDING_DIM = 1024  # Qwen3 차원
 def chunk_text(text: str, chunk_size: int = 800, overlap: int = 100) -> List[str]:
     """
     긴 텍스트를 일정 크기로 청킹 (오버랩 포함)
-    
+
     Args:
         text: 청킹할 텍스트
         chunk_size: 청크 크기 (문자 수)
         overlap: 청크 간 오버랩 크기
-    
+
     Returns:
         청크 리스트
     """
     if len(text) <= chunk_size:
         return [text]
-    
+
     chunks = []
     start = 0
-    
+
     while start < len(text):
         end = start + chunk_size
-        
+
         # 마지막 청크가 아니면 문장 경계에서 자르기 시도
         if end < len(text):
             # 줄바꿈이나 마침표 찾기
@@ -66,14 +66,14 @@ def chunk_text(text: str, chunk_size: int = 800, overlap: int = 100) -> List[str
                 if last_sep > chunk_size * 0.5:  # 최소 50% 이상은 채워야 함
                     end = start + last_sep + len(sep)
                     break
-        
+
         chunk = text[start:end].strip()
         if chunk:
             chunks.append(chunk)
-        
+
         # 오버랩 적용
         start = end - overlap if end < len(text) else end
-    
+
     return chunks
 
 
@@ -84,7 +84,7 @@ class LegalVectorDB:
     def __init__(self, url: str, api_key: str):
         """
         Qdrant Cloud 클라이언트 초기화
-        
+
         Args:
             url: Qdrant Cloud URL
             api_key: Qdrant Cloud API 키
@@ -117,7 +117,7 @@ class LegalVectorDB:
     def add_documents(self, collection_name: str, documents: List[Dict[str, Any]], batch_size: int = 8):
         """
         문서 추가 (청킹 + 메모리 효율적 배치 처리)
-        
+
         Args:
             collection_name: 컬렉션 이름
             documents: 문서 리스트 (각 문서는 {'text': str, 'metadata': dict} 형태)
@@ -134,10 +134,10 @@ class LegalVectorDB:
         for doc_idx, doc in enumerate(documents):
             text = doc['text']
             metadata = doc['metadata']
-            
+
             # 텍스트를 청크로 분할
             text_chunks = chunk_text(text, chunk_size=800, overlap=100)
-            
+
             # 각 청크에 메타데이터 추가
             for chunk_idx, chunk_str in enumerate(text_chunks):
                 chunk_metadata = {
@@ -151,7 +151,7 @@ class LegalVectorDB:
                     'text': chunk_str,
                     'metadata': chunk_metadata
                 })
-        
+
         print(f"청킹 완료: {len(documents)}개 문서 → {len(all_chunks)}개 청크")
 
         # 2단계: 배치 임베딩 및 업로드
@@ -189,7 +189,8 @@ class LegalVectorDB:
             )
 
             total_saved += len(points)
-            print(f"\r저장됨: {total_saved}/{len(all_chunks)}", end='', flush=True)
+            print(f"\r저장됨: {total_saved}/{len(all_chunks)}",
+                  end='', flush=True)
 
         print(f"\n'{collection_name}'에 {total_saved}개 청크 저장 완료")
 
@@ -243,7 +244,7 @@ def main():
 
     if not api_key:
         raise ValueError("❌ QDRANT_API_KEY 환경변수가 설정되지 않았습니다.")
-    
+
     if not collection_name:
         raise ValueError("❌ QDRANT_COLLECTION_NAME 환경변수가 설정되지 않았습니다.")
 
@@ -284,6 +285,16 @@ def main():
         print(f"고용노동부 Q&A {len(data)}개 문서 로드 완료")
     else:
         print(f"파일 없음: {moel_qa_file}")
+
+    # 4. 중앙부처 1차 해석 (판정선례) 데이터 로드
+    qa_resp_file = os.path.join(PROCESSED_DIR, "fd_법령외_판정선례.json")
+    if os.path.exists(qa_resp_file):
+        print(f"\n=== 중앙부처 1차 해석 데이터 로드 중 ===")
+        data = load_json(qa_resp_file)
+        all_chunks.extend(data)
+        print(f"중앙부처 1차 해석 {len(data)}개 문서 로드 완료")
+    else:
+        print(f"파일 없음: {qa_resp_file}")
 
     print(f"\n총 {len(all_chunks)}개 문서 로드 완료")
 
