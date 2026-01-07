@@ -58,6 +58,10 @@ def load_documents_from_qdrant(
     from langchain_core.documents import Document
     from qdrant_client import QdrantClient
 
+    # 스크립트 디렉토리의 .env 파일 로드 (강제)
+    script_dir = Path(__file__).parent
+    load_dotenv(script_dir / ".env", override=True)
+
     # 환경변수에서 Qdrant 설정 가져오기
     qdrant_url = os.getenv("QDRANT_URL")
     qdrant_api_key = os.getenv("QDRANT_API_KEY")
