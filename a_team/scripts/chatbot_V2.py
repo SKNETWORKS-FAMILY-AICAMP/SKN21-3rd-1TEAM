@@ -1,3 +1,11 @@
+################################################
+# A-TEAM 법률 RAG 챗봇 (LangGraph V2)
+  # V1에서 Reranker 추가 및 노드 함수 분리
+# 작성자 정보
+  # 작성자: SKN 3-1팀 A-TEAM
+  # 작성일: 2026-01-07
+################################################
+
 import os
 import warnings
 from pathlib import Path

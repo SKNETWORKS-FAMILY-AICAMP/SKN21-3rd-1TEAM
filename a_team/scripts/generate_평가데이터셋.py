@@ -166,6 +166,8 @@ def sample_with_quota(df: pd.DataFrame, domain_targets: Dict[str, int]) -> pd.Da
     domain_targets 예: {"노동법":10, "민사법":5, "형사법":5}
     각 도메인 내부에서 난이도 쿼터(2:1:1)를 계산해서 충족하도록 샘플링.
     노동법은 labor_non_statute_ok == True 를 우선 채택(가능하면).
+    
+    쿼터 부족 시: 다른 난이도에서 대체 샘플링 (유연 모드)
     """
     picked_frames = []
 
@@ -173,39 +175,81 @@ def sample_with_quota(df: pd.DataFrame, domain_targets: Dict[str, int]) -> pd.Da
         dq = compute_difficulty_quota(n)
         domain_df = df[df["domain"] == domain].copy()
 
+        if len(domain_df) == 0:
+            print(f"⚠️  [{domain}] 해당 분야 질문이 없습니다. 스킵합니다.")
+            continue
+
         # 노동법이면 non_statute_ok 우선순위 부여
         if domain == "노동법":
             domain_df["__priority"] = domain_df["labor_non_statute_ok"].apply(lambda x: 0 if x else 1)
             domain_df = domain_df.sort_values(["__priority"])
 
-        for level, k in dq.items():
-            sub = domain_df[domain_df["difficulty"] == level]
-            if len(sub) < k:
-                raise ValueError(f"쿼터 충족 실패: {domain}/{level} 필요 {k}개, 보유 {len(sub)}개")
-            picked_frames.append(sub.sample(n=k, random_state=42))
+        picked_ids = set()
+        domain_picked = []
+        shortage = 0  # 부족분 누적
 
+        for level, k in dq.items():
+            sub = domain_df[(domain_df["difficulty"] == level) & (~domain_df.index.isin(picked_ids))]
+            available = len(sub)
+            take = min(available, k)
+            
+            if take < k:
+                shortage += (k - take)
+                print(f"⚠️  [{domain}/{level}] 필요 {k}개, 보유 {available}개 → {take}개 샘플링 (부족 {k - take}개)")
+            
+            if take > 0:
+                sampled = sub.sample(n=take, random_state=42)
+                domain_picked.append(sampled)
+                picked_ids.update(sampled.index)
+
+        # 부족분을 다른 난이도에서 보충
+        if shortage > 0:
+            remaining = domain_df[~domain_df.index.isin(picked_ids)]
+            補充 = min(len(remaining), shortage)
+            if 補充 > 0:
+                print(f"   ↳ [{domain}] 부족분 {shortage}개 중 {補充}개를 다른 난이도에서 보충")
+                補充_sampled = remaining.sample(n=補充, random_state=42)
+                domain_picked.append(補充_sampled)
+                picked_ids.update(補充_sampled.index)
+
+        if domain_picked:
+            picked_frames.extend(domain_picked)
+
+    if not picked_frames:
+        raise ValueError("샘플링된 데이터가 없습니다. 생성된 풀을 확인해주세요.")
+    
     out = pd.concat(picked_frames, ignore_index=True)
-    if len(out) != sum(domain_targets.values()):
-        raise ValueError("샘플링 결과 개수가 목표와 다릅니다.")
+    
+    expected = sum(domain_targets.values())
+    if len(out) != expected:
+        print(f"⚠️  최종 샘플 수: {len(out)}개 (목표 {expected}개)")
+    
     return out
 
 
 # --------------------------------
-# Qdrant에서 문서 로드(기존 유지)
+# Qdrant에서 문서 로드 (최적화 버전)
 # --------------------------------
-def load_documents_from_qdrant(
+def load_documents_from_qdrant_by_domain(
     collection_name: str = None,
-    limit: int = 0
-) -> list:
+    docs_per_domain: int = 500
+) -> Dict[str, list]:
+    """
+    Qdrant에서 분야별로 필요한 문서만 샘플링해서 로드.
+    전체 스캔 대신 랜덤 샘플링으로 빠르게 가져옴.
+    """
     from langchain_core.documents import Document
     from qdrant_client import QdrantClient
+    from qdrant_client.models import Filter, FieldCondition, MatchAny
+    import random
 
     qdrant_url = os.getenv("QDRANT_URL")
     qdrant_api_key = os.getenv("QDRANT_API_KEY")
     collection = collection_name or os.getenv("QDRANT_COLLECTION_NAME", "A-TEAM")
 
-    print(f"📂 Qdrant DB에서 문서 로드 중...")
+    print(f"📂 Qdrant DB에서 분야별 문서 샘플링 중...")
     print(f"   Collection: {collection}")
+    print(f"   분야별 최대: {docs_per_domain}개")
 
     if qdrant_url and qdrant_api_key:
         print(f"   URL: {qdrant_url[:30]}...")
@@ -225,55 +269,160 @@ def load_documents_from_qdrant(
     except Exception as e:
         raise ConnectionError(f"Qdrant 컬렉션 '{collection}'에 연결할 수 없습니다: {e}")
 
-    documents = []
-    offset = None
-    batch_size = 100
+    # 분야별 키워드 패턴
+    domain_patterns = {
+        "노동법": ["노동", "근로", "임금", "해고", "퇴직", "고용", "산재", "산업재해", "근로기준"],
+        "민사법": ["민사", "계약", "손해배상", "채권", "소유", "민법", "부동산", "임대차"],
+        "형사법": ["형사", "범죄", "수사", "형벌", "공소", "형법", "처벌", "피의자"],
+    }
 
-    while True:
-        results = client.scroll(
-            collection_name=collection,
-            limit=batch_size,
-            offset=offset,
-            with_payload=True,
-            with_vectors=False
-        )
-
-        points, next_offset = results
-
-        if not points:
-            break
-
-        for point in points:
-            payload = point.payload or {}
-            text = payload.get("text", "")
-
-            if text and len(text) > 30:
-                doc = Document(
-                    page_content=text,
-                    metadata={
-                        "id": str(point.id),
-                        "source": payload.get("source", ""),
-                        "law_name": payload.get("law_name", ""),
-                        "law_id": payload.get("law_id", ""),
-                        "article_no": payload.get("article_no", ""),
-                        "article_title": payload.get("article_title", ""),
-                        "paragraph_no": payload.get("paragraph_no", ""),
-                        "chunk_type": payload.get("chunk_type", ""),
-                        "category": payload.get("category", ""),
-                        "chunk_index": payload.get("chunk_index", 0),
-                    }
+    buckets = {"노동법": [], "민사법": [], "형사법": [], "기타": []}
+    
+    # 다양성 확보를 위한 분산 샘플링
+    sample_size = min(docs_per_domain * 6, 5000)
+    batch_size = 20  # 작은 배치로 다양한 위치에서 샘플링
+    num_sampling_points = max(100, sample_size // batch_size)  # 최소 100개 위치
+    
+    print(f"\n   📥 분산 랜덤 샘플링 중 ({sample_size}개 목표, {num_sampling_points}개 위치)")
+    
+    # 전체 범위를 균등 분할 후 각 구간에서 랜덤 샘플링
+    all_sampled = []
+    
+    if total_points > sample_size:
+        # 전체 범위를 num_sampling_points개 구간으로 나누기
+        segment_size = total_points // num_sampling_points
+        
+        for i in range(num_sampling_points):
+            if len(all_sampled) >= sample_size:
+                break
+            
+            # 각 구간 내에서 랜덤 오프셋 선택
+            segment_start = i * segment_size
+            segment_end = min((i + 1) * segment_size, total_points)
+            
+            if segment_end - segment_start < batch_size:
+                random_offset = segment_start
+            else:
+                random_offset = random.randint(segment_start, max(segment_start, segment_end - batch_size))
+            
+            try:
+                results = client.scroll(
+                    collection_name=collection,
+                    limit=batch_size,
+                    offset=random_offset,
+                    with_payload=True,
+                    with_vectors=False
                 )
-                documents.append(doc)
+                
+                points, _ = results
+                
+                for point in points:
+                    if len(all_sampled) >= sample_size:
+                        break
+                    
+                    payload = point.payload or {}
+                    text = payload.get("text", "")
+                    
+                    if text and len(text) > 30:
+                        doc = Document(
+                            page_content=text,
+                            metadata={
+                                "id": str(point.id),
+                                "source": payload.get("source", ""),
+                                "law_name": payload.get("law_name", ""),
+                                "law_id": payload.get("law_id", ""),
+                                "article_no": payload.get("article_no", ""),
+                                "article_title": payload.get("article_title", ""),
+                                "paragraph_no": payload.get("paragraph_no", ""),
+                                "chunk_type": payload.get("chunk_type", ""),
+                                "category": payload.get("category", ""),
+                                "chunk_index": payload.get("chunk_index", 0),
+                            }
+                        )
+                        all_sampled.append(doc)
+            except Exception as e:
+                # 일부 오프셋에서 오류 발생 시 스킵
+                continue
+    else:
+        # 전체 데이터가 샘플 사이즈보다 작으면 전체 로드
+        offset = None
+        while True:
+            results = client.scroll(
+                collection_name=collection,
+                limit=100,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False
+            )
+            
+            points, next_offset = results
+            if not points:
+                break
+                
+            for point in points:
+                payload = point.payload or {}
+                text = payload.get("text", "")
+                
+                if text and len(text) > 30:
+                    doc = Document(
+                        page_content=text,
+                        metadata={
+                            "id": str(point.id),
+                            "source": payload.get("source", ""),
+                            "law_name": payload.get("law_name", ""),
+                            "law_id": payload.get("law_id", ""),
+                            "article_no": payload.get("article_no", ""),
+                            "article_title": payload.get("article_title", ""),
+                            "paragraph_no": payload.get("paragraph_no", ""),
+                            "chunk_type": payload.get("chunk_type", ""),
+                            "category": payload.get("category", ""),
+                            "chunk_index": payload.get("chunk_index", 0),
+                        }
+                    )
+                    all_sampled.append(doc)
+            
+            offset = next_offset
+            if offset is None:
+                break
 
-        offset = next_offset
-        if limit > 0 and len(documents) >= limit:
-            documents = documents[:limit]
-            break
-        if next_offset is None:
-            break
+    print(f"   ✅ {len(all_sampled)}개 문서 샘플링 완료")
 
-    print(f"\n📄 총 {len(documents)}개 청킹된 문서 로드 완료\n")
-    return documents
+    # 분야별 분류 (다양성 확보를 위해 분야별로 균등하게 분산)
+    def classify_domain(doc) -> str:
+        meta = doc.metadata or {}
+        cat = str(meta.get("category", ""))
+        law = str(meta.get("law_name", ""))
+        src = str(meta.get("source", ""))
+        text_preview = doc.page_content[:200] if doc.page_content else ""
+        hay = f"{cat} {law} {src} {text_preview}"
+
+        for domain, keywords in domain_patterns.items():
+            if any(kw in hay for kw in keywords):
+                return domain
+        return "기타"
+
+    # 셔플해서 순서 랜덤화 (같은 법률이 연속으로 오는 것 방지)
+    random.shuffle(all_sampled)
+    
+    for doc in all_sampled:
+        domain = classify_domain(doc)
+        if len(buckets[domain]) < docs_per_domain:
+            buckets[domain].append(doc)
+    
+    # 각 분야 내에서도 다시 셔플 (법률명 기준 다양성 확보)
+    for domain in buckets:
+        random.shuffle(buckets[domain])
+
+    print(f"\n📄 분야별 로드 완료:")
+    for k, v in buckets.items():
+        if v:
+            # 해당 분야의 법률명 다양성 체크
+            law_names = set(doc.metadata.get("law_name", "알 수 없음") for doc in v if doc.metadata.get("law_name"))
+            print(f"   📌 {k}: {len(v)} docs (법률 {len(law_names)}종류)")
+        else:
+            print(f"   📌 {k}: {len(v)} docs")
+
+    return buckets
 
 
 # ---------------------------------------------------------
@@ -400,7 +549,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="RAGAS 기반 Golden Set 생성(커스텀 쿼터/난이도)")
     parser.add_argument('--collection', type=str, default=None)
-    parser.add_argument('--sample-size', type=int, default=0, help="Qdrant에서 가져올 문서 수(0=전체)")
+    parser.add_argument('--docs-per-domain', type=int, default=500, help="분야별 샘플링할 문서 수(기본 500)")
     parser.add_argument('--model', type=str, default='gpt-4o-mini', help='생성/라벨링에 사용할 LLM 모델')
     parser.add_argument('--output', type=str, default='golden_set_quota_20.json')
     parser.add_argument('--pool-mult', type=int, default=6, help="분야별 생성 풀 크기 배수(기본 6배)")
@@ -414,29 +563,30 @@ def main():
     print("🏛️  RAG 평가용 Golden Set 생성 (RAGAS + 쿼터 샘플링)")
     print("=" * 60)
 
-    # 1) 문서 로드
-    all_docs = load_documents_from_qdrant(collection_name=args.collection, limit=args.sample_size)
-    if not all_docs:
+    # 1) 분야별 문서 직접 샘플링 (최적화)
+    buckets = load_documents_from_qdrant_by_domain(
+        collection_name=args.collection, 
+        docs_per_domain=args.docs_per_domain
+    )
+    
+    total_docs = sum(len(v) for v in buckets.values())
+    if total_docs == 0:
         print("❌ 로드된 문서가 없습니다. Qdrant 연결을 확인해주세요.")
         return
-
-    # 2) 분야별 문서 버킷
-    buckets = split_docs_by_domain(all_docs)
-    for k, v in buckets.items():
-        print(f"   📌 {k}: {len(v)} docs")
 
     # 목표 쿼터
     domain_targets = {"노동법": 10, "민사법": 5, "형사법": 5}
 
-    # 3) RAGAS generator 설정
+    # 2) RAGAS generator 설정
     generator = setup_generator(args.model)
 
-    # 4) 분야별로 풀 생성(충분히 크게)
+    # 3) 분야별로 풀 생성(충분히 크게)
     frames = []
     for domain, target_n in domain_targets.items():
         docs = buckets.get(domain, [])
         if not docs:
-            raise ValueError(f"'{domain}' 문서가 Qdrant에서 발견되지 않았습니다. category/metadata를 확인하세요.")
+            print(f"⚠️  '{domain}' 문서가 없습니다. 스킵합니다.")
+            continue
 
         # 노동법은 비법령 문서 섞이도록 믹스
         if domain == "노동법":
