@@ -136,6 +136,51 @@ def load_interpretation_data(file_path: Path) -> Tuple[List[str], List[Dict]]:
     return documents, metadatas
 
 
+def load_moel_qa_data(file_path: Path) -> Tuple[List[str], List[Dict]]:
+    """
+    고용노동부 Q&A 데이터 로드 및 전처리
+    
+    Args:
+        file_path: rd_법령외_고용노동부QA.json 파일 경로
+    
+    Returns:
+        (documents, metadatas) 튜플
+    """
+    print(f"\n📂 고용노동부 Q&A 데이터 로드 중: {file_path.name}")
+    
+    with open(file_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    
+    documents = []
+    metadatas = []
+    
+    for item in tqdm(data, desc="Q&A 전처리"):
+        title = item.get('title', '').strip()
+        question = clean_text(item.get('question', ''))
+        answer = clean_text(item.get('answer', ''))
+        
+        # 질의와 답변이 모두 있어야 함
+        if not (question and answer):
+            continue
+        
+        # 텍스트 구성: [고용노동부 Q&A] 제목\n질의\n답변
+        text = f"[고용노동부 Q&A] {title}\n\n질의:\n{question}\n\n답변:\n{answer}"
+        
+        # 문서 및 메타데이터 추가
+        documents.append(text)
+        metadatas.append({
+            'source': 'moel_qa',
+            'title': title,
+            'category': item.get('category', ''),
+            'seq': item.get('seq', ''),
+            'url': item.get('url', ''),
+            'doc_length': len(text)
+        })
+    
+    print(f"✅ 고용노동부 Q&A {len(documents)}개 문서 전처리 완료")
+    return documents, metadatas
+
+
 def save_preprocessed_data(documents: List[str], metadatas: List[Dict], output_path: Path):
     """
     전처리된 데이터를 JSON 파일로 저장
@@ -177,12 +222,14 @@ def main():
     processed_dir.mkdir(exist_ok=True, parents=True)
     
     # 입력 파일
-    case_law_file = raw_dir / "rd_주요판례.json"
-    interpretation_file = raw_dir / "rd_행정해석.json"
+    case_law_file = raw_dir / "rd_법령외_주요판례.json"
+    interpretation_file = raw_dir / "rd_법령외_행정해석.json"
+    moel_qa_file = raw_dir / "rd_법령외_고용노동부QA.json"
     
     # 출력 파일
-    case_law_output = processed_dir / "판례_전처리완료.json"
-    interpretation_output = processed_dir / "행정해석_전처리완료.json"
+    case_law_output = processed_dir / "fd_법령외_판례.json"
+    interpretation_output = processed_dir / "fd_법령외_행정해석.json"
+    moel_qa_output = processed_dir / "fd_법령외_고용노동부QA.json"
     
     # 파일 존재 확인
     if not case_law_file.exists():
@@ -193,6 +240,10 @@ def main():
         print(f"❌ 파일 없음: {interpretation_file}")
         return
     
+    if not moel_qa_file.exists():
+        print(f"❌ 파일 없음: {moel_qa_file}")
+        return
+    
     # 데이터 로드 및 전처리
     # 1. 판례 데이터
     case_docs, case_metas = load_case_law_data(case_law_file)
@@ -200,17 +251,24 @@ def main():
     # 2. 행정해석 데이터
     interp_docs, interp_metas = load_interpretation_data(interpretation_file)
     
+    # 3. 고용노동부 Q&A 데이터
+    moel_qa_docs, moel_qa_metas = load_moel_qa_data(moel_qa_file)
+    
     # 전처리 데이터 저장 (판례)
     save_preprocessed_data(case_docs, case_metas, case_law_output)
     
     # 전처리 데이터 저장 (행정해석)
     save_preprocessed_data(interp_docs, interp_metas, interpretation_output)
     
+    # 전처리 데이터 저장 (고용노동부 Q&A)
+    save_preprocessed_data(moel_qa_docs, moel_qa_metas, moel_qa_output)
+    
     print("\n" + "="*60)
     print("✅ 전처리 완료!")
     print(f"📄 출력 파일:")
     print(f"  - {case_law_output}")
     print(f"  - {interpretation_output}")
+    print(f"  - {moel_qa_output}")
     print("="*60 + "\n")
     
     # 샘플 출력
@@ -221,4 +279,14 @@ def main():
     
     print("\n📄 샘플 문서 (행정해석):")
     print("-"*60)
-    print(interp_docs[0][:500] + "..." if len(interp_docs[0]) > 500 else interp_doc
+    print(interp_docs[0][:500] + "..." if len(interp_docs[0]) > 500 else interp_docs[0])
+    print("-"*60)
+    
+    print("\n📄 샘플 문서 (고용노동부 Q&A):")
+    print("-"*60)
+    print(moel_qa_docs[0][:500] + "..." if len(moel_qa_docs[0]) > 500 else moel_qa_docs[0])
+    print("-"*60)
+
+
+if __name__ == "__main__":
+    main()
