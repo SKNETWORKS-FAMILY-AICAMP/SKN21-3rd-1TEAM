@@ -118,7 +118,7 @@ def run_inference(questions: List[str], verbose: bool = True) -> List[Dict[str, 
         List of {answer: str, contexts: List[str]}
     """
     # baseline.py에서 챗봇 초기화 함수 임포트
-    from baseline import initialize_rag_chatbot
+    from a_team.scripts.chatbot_baseline import initialize_rag_chatbot
 
     print("\n🤖 Baseline 모델 초기화 중...")
     chatbot = initialize_rag_chatbot()
