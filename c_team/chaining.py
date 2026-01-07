@@ -11,7 +11,7 @@ load_dotenv()
 
 def get_retriever():
     vector_store = get_vector_store()
-    return vector_store.as_retriever(search_kwargs={"k": 2})
+    return vector_store.as_retriever(search_kwargs={"k": 5})
 
 
 def get_chain():
