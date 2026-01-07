@@ -53,10 +53,10 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 # ============================================================
 def load_golden_dataset(path: str) -> pd.DataFrame:
     """
-    Golden Dataset CSV 파일을 로드합니다.
+    Golden Dataset JSON 파일을 로드합니다.
 
     Args:
-        path: CSV 파일 경로
+        path: JSON 파일 경로
 
     Returns:
         DataFrame with columns: user_input, reference (ground truth)
@@ -64,7 +64,7 @@ def load_golden_dataset(path: str) -> pd.DataFrame:
     if not os.path.exists(path):
         raise FileNotFoundError(f"Golden Dataset을 찾을 수 없습니다: {path}")
 
-    df = pd.read_csv(path)
+    df = pd.read_json(path)
 
     # Ragas 0.4.x 컬럼명 확인 및 매핑
     # 예상 컬럼: user_input, reference, reference_contexts
@@ -241,7 +241,7 @@ def save_results(
     output_path: str
 ):
     """
-    평가 결과를 CSV 파일로 저장합니다.
+    평가 결과를 JSON 파일로 저장합니다.
 
     Args:
         df: 원본 데이터프레임 (질문, 정답 포함)
@@ -257,7 +257,8 @@ def save_results(
 
     # 저장
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    final_df.to_csv(output_path, index=False, encoding='utf-8-sig')
+    final_df.to_json(output_path, orient='records',
+                     force_ascii=False, indent=2)
 
     print(f"\n💾 결과 저장 완료: {output_path}")
 
@@ -270,8 +271,8 @@ def main():
     parser.add_argument(
         '--golden-set',
         type=str,
-        default='a_team/data/evaluation/labor_law_golden_set.csv',
-        help='Golden Dataset CSV 경로'
+        default='a_team/data/evaluation/labor_law_golden_set.json',
+        help='Golden Dataset JSON 경로'
     )
     parser.add_argument(
         '--output',
@@ -361,7 +362,7 @@ def main():
     else:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_dir = Path(args.golden_set).parent
-        output_path = output_dir / f"evaluation_results_{timestamp}.csv"
+        output_path = output_dir / f"evaluation_results_{timestamp}.json"
 
     save_results(df, ragas_result, str(output_path))
 

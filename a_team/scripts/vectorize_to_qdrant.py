@@ -82,73 +82,77 @@ def clean_interpretation_text(text: str) -> str:
 # 청킹 함수
 # ============================================================
 def chunk_law_data(law_data: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """법령 데이터를 조문 > 항(①②③) 단위로 청킹"""
+    """
+    법령 데이터를 하이브리드 청킹 전략으로 처리
+
+    전략:
+    - 조 단위 기본 청킹 (의미적 완결성 보장)
+    - 500자 초과 조문은 항 단위로 분리 (토큰 제한 고려)
+    - 항 단위 분리 시 조 컨텍스트 prefix 추가
+    """
     chunks = []
 
-    # 항 번호 기호들
-    PARAGRAPH_MARKERS = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
+    # meta_info에서 법률 정보 추출
+    meta = law_data.get('meta_info', {})
+    law_name = meta.get('law_name', '')
+    law_id = meta.get('law_id', '')
+    category = meta.get('category', '')
+    url = meta.get('url', '')
 
-    for article in law_data.get('articles', []):
-        content = clean_law_content(article.get('content', ''))
-        if not content or len(content) < 10:
+    # body에서 조문 처리
+    for article in law_data.get('body', []):
+        article_no = article.get('article_no', '')
+        article_title = article.get('article_title', '')
+        article_text = clean_law_content(article.get('article_text_full', ''))
+        paragraphs = article.get('paragraphs', [])
+
+        if not article_text or len(article_text) < 10:
             continue
 
-        article_num = article.get('article_num', '')
-        law_title = law_data.get('title', '')
         base_metadata = {
             'source': 'law',
-            'law_title': law_title,
-            'category': law_data.get('category', ''),
-            'article_num': article_num,
-            'is_addendum': article.get('is_addendum', False),
-            'url': law_data.get('url', ''),
-            'lsi_seq': law_data.get('lsi_seq', '')
+            'law_name': law_name,
+            'law_id': law_id,
+            'category': category,
+            'article_no': article_no,
+            'article_title': article_title,
+            'url': url
         }
 
-        # 항(①②③) 기호가 있는지 확인
-        has_paragraphs = any(marker in content for marker in PARAGRAPH_MARKERS)
-
-        if not has_paragraphs or len(content) <= 500:
-            # 항 구분 없거나 짧으면 통째로 1청크
+        # 하이브리드 청킹: 조가 짧으면 통째로, 길면 항 단위로 분리
+        if len(article_text) <= 500 or len(paragraphs) <= 1:
+            # 조 단위 청킹 (짧은 조문 또는 항이 1개뿐인 경우)
             chunks.append({
-                'text': content,
-                'metadata': {**base_metadata, 'paragraph': '', 'chunk_index': 0}
+                'text': article_text,
+                'metadata': {
+                    **base_metadata,
+                    'paragraph_no': '',
+                    'chunk_type': 'full_article',
+                    'chunk_index': 0
+                }
             })
         else:
-            # 항(①②③) 기호로 분할
-            pattern = f'([{PARAGRAPH_MARKERS}])'
-            parts = re.split(pattern, content)
+            # 항 단위 청킹 (긴 조문)
+            # 조 제목을 prefix로 붙여 컨텍스트 유지
+            prefix = f"{law_name} {article_title}\n\n"
 
-            current_text = ""
-            current_para = ""
-            chunk_index = 0
+            for i, para in enumerate(paragraphs):
+                para_no = para.get('no', str(i + 1))
+                para_content = clean_law_content(para.get('content', ''))
 
-            for i, part in enumerate(parts):
-                if part in PARAGRAPH_MARKERS:
-                    # 이전 항 저장
-                    if current_text.strip() and len(current_text.strip()) > 10:
-                        chunks.append({
-                            'text': current_text.strip(),
-                            'metadata': {
-                                **base_metadata,
-                                'paragraph': current_para,
-                                'chunk_index': chunk_index
-                            }
-                        })
-                        chunk_index += 1
-                    current_para = part
-                    current_text = part
-                else:
-                    current_text += part
+                if not para_content or len(para_content) < 10:
+                    continue
 
-            # 마지막 항 저장
-            if current_text.strip() and len(current_text.strip()) > 10:
+                # prefix + 항 내용
+                chunk_text = prefix + para_content
+
                 chunks.append({
-                    'text': current_text.strip(),
+                    'text': chunk_text,
                     'metadata': {
                         **base_metadata,
-                        'paragraph': current_para,
-                        'chunk_index': chunk_index
+                        'paragraph_no': para_no,
+                        'chunk_type': 'paragraph',
+                        'chunk_index': i
                     }
                 })
 
