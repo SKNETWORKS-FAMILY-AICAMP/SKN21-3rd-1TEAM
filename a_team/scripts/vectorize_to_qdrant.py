@@ -2,20 +2,24 @@
 법령 및 행정해석 데이터 Qdrant 벡터 DB 저장 스크립트
 """
 
-import json
-import os
-import re
-from typing import List, Dict, Any
-from datetime import datetime
-
-from qdrant_client import QdrantClient
+from sentence_transformers import SentenceTransformer
 from qdrant_client.models import (
     VectorParams,
     Distance,
     PointStruct,
     models
 )
-from sentence_transformers import SentenceTransformer
+import json
+import os
+import re
+from typing import List, Dict, Any
+from datetime import datetime
+
+from dotenv import load_dotenv
+from qdrant_client import QdrantClient
+
+# 환경변수 로드
+load_dotenv()
 
 # ============================================================
 # 경로 설정
