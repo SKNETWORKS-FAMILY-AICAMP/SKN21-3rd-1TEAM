@@ -39,6 +39,7 @@ from datasets import Dataset
 
 # LangChain (평가용 LLM)
 from langchain_openai import ChatOpenAI
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.messages import HumanMessage
 
 # 환경변수 로드

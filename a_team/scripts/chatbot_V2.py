@@ -93,7 +93,8 @@ class JinaReranker(BaseDocumentCompressor):
                 return_tensors="pt",
                 max_length=512
             )
-            scores = self.model(**inputs).logits.squeeze(-1).float().tolist()
+            scores = self.model(**inputs).logits.squeeze(-1).float().cpu()
+            scores = torch.sigmoid(scores).tolist()
             if not isinstance(scores, list):
                 scores = [scores]
 
