@@ -21,7 +21,6 @@ from typing import Dict, List, Tuple
 
 from ragas.testset import TestsetGenerator
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain_community.document_loaders import DirectoryLoader, PyPDFLoader, TextLoader
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -245,7 +244,6 @@ def load_documents_from_qdrant_by_domain(
     """
     from langchain_core.documents import Document
     from qdrant_client import QdrantClient
-    from qdrant_client.models import Filter, FieldCondition, MatchAny
     import random
 
     qdrant_url = os.getenv("QDRANT_URL")
@@ -482,33 +480,6 @@ def generate_testset(generator: TestsetGenerator, documents: list, test_size: in
         run_config=run_config,
     )
     return testset.to_pandas()
-
-
-def split_docs_by_domain(docs: list) -> Dict[str, list]:
-    """
-    Qdrant payload metadata 기반으로 대략적인 분야별 문서 분리.
-    - metadata.category 또는 law_name/source 등에 '노동/민사/형사' 포함 여부로 분류
-    """
-    buckets = {"노동법": [], "민사법": [], "형사법": [], "기타": []}
-
-    def guess_domain(doc) -> str:
-        meta = doc.metadata or {}
-        cat = str(meta.get("category", ""))
-        law = str(meta.get("law_name", ""))
-        src = str(meta.get("source", ""))
-        hay = f"{cat} {law} {src}"
-
-        if re.search(r"노동|근로|임금|해고|퇴직", hay):
-            return "노동법"
-        if re.search(r"민사|계약|손해배상|채권|소유", hay):
-            return "민사법"
-        if re.search(r"형사|범죄|수사|형벌|공소", hay):
-            return "형사법"
-        return "기타"
-
-    for d in docs:
-        buckets[guess_domain(d)].append(d)
-    return buckets
 
 
 def make_labor_mixed_docs(labor_docs: list, max_docs: int) -> list:

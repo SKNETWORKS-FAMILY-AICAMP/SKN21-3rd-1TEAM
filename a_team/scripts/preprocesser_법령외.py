@@ -25,10 +25,10 @@ def clean_text(text: str) -> str:
 
 def load_case_law_data(file_path: Path) -> Tuple[List[str], List[Dict]]:
     """
-    주요주요판정사례 데이터 로드 및 전처리
+    주요판정사례 데이터 로드 및 전처리
 
     Args:
-        file_path: rd_주요주요판정사례.json 파일 경로
+        file_path: rd_주요판정사례.json 파일 경로
 
     Returns:
         (documents, metadatas) 튜플
@@ -257,51 +257,6 @@ def load_moel_qa_data(file_path: Path) -> Tuple[List[str], List[Dict]]:
         })
 
     print(f"✅ 고용노동부 Q&A {len(documents)}개 문서 전처리 완료")
-    return documents, metadatas
-
-
-def load_qa_response_data(file_path: Path) -> Tuple[List[str], List[Dict]]:
-    """
-    중앙부처 1차 해석 (질의회답) 데이터 로드 및 전처리
-
-    Args:
-        file_path: rd_법령외_질의회답.json 파일 경로
-
-    Returns:
-        (documents, metadatas) 튜플
-    """
-    print(f"\n📂 중앙부처 1차 해석 데이터 로드 중: {file_path.name}")
-
-    with open(file_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-
-    documents = []
-    metadatas = []
-
-    for item in tqdm(data, desc="질의회답 전처리"):
-        title = item.get('title', '').strip()
-        question = clean_text(item.get('question', ''))
-        answer = clean_text(item.get('answer', ''))
-
-        # 질의와 답변은 필수
-        if not (question or answer):
-            continue
-
-        # 텍스트 구성
-        text = f"[질의회답] {title}\n\n질의:\n{question}\n\n답변:\n{answer}"
-
-        # 문서 및 메타데이터 추가
-        documents.append(text)
-        metadatas.append({
-            'source': 'qa_response',
-            'title': title,
-            'agency': item.get('agency', ''),
-            'date': item.get('date', ''),
-            'url': item.get('url', ''),
-            'doc_length': len(text)
-        })
-
-    print(f"✅ 중앙부처 1차 해석 {len(documents)}개 문서 전처리 완료")
     return documents, metadatas
 
 
