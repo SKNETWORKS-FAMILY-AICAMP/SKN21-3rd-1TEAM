@@ -35,6 +35,8 @@ from ragas.metrics import (
     LLMContextPrecisionWithoutReference,
     LLMContextRecall,
 )
+from ragas.embeddings import LangchainEmbeddingsWrapper
+from ragas.llms import LangchainLLMWrapper
 from datasets import Dataset
 
 # LangChain (평가용 LLM)
