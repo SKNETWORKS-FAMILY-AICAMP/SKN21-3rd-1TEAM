@@ -8,6 +8,8 @@ dependencies = [
     "beautifulsoup4>=4.14.3",
     "playwright>=1.57.0",
     "qdrant-client>=1.16.2",
+    "ragas>=0.4.2",
+    "rapidfuzz>=3.14.3",
     "requests>=2.32.5",
     "sentence-transformers>=5.2.0",
 ]
