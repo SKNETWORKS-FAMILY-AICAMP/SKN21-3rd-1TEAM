@@ -23,13 +23,13 @@ def initialize_rag_chatbot():
     
     # 1. 환경 변수 로드
     COLLECTION_NAME = os.getenv("QDRANT_COLLECTION_NAME")
-    QDRANT_HOST = os.getenv("QDRANT_HOST")
-    QDRANT_PORT = int(os.getenv("QDRANT_PORT"))
+    QDRANT_URL = os.getenv("QDRANT_URL")
     QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
     
+    if not QDRANT_API_KEY:
+        raise ValueError("QDRANT_API_KEY가 .env 파일에 설정되지 않았습니다!")
+    
     print(f"🔧 설정 로드 완료")
-    # print(f"  - Qdrant Host: {QDRANT_HOST}:{QDRANT_PORT}")
-    # print(f"  - Collection: {COLLECTION_NAME}")
     
     # 2. 임베딩 모델 설정
     print(f"\n🚀 임베딩 모델 로드 중 (Qwen/Qwen3-Embedding-0.6B)...")
@@ -45,7 +45,7 @@ def initialize_rag_chatbot():
     warnings.filterwarnings('ignore', message='Api key is used with an insecure connection')
     
     client = QdrantClient(
-        url="https://75daa0f4-de48-4954-857a-1fbc276e298f.us-east4-0.gcp.cloud.qdrant.io/",
+        url=QDRANT_URL,
         api_key=QDRANT_API_KEY,
         timeout=30,
         prefer_grpc=False)
