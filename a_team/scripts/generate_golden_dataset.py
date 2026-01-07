@@ -289,11 +289,24 @@ def setup_generator(model_name: str = "gpt-5.2") -> TestsetGenerator:
 
     # ---------------------------------------------------------
     # Ragas 0.4.x: TestsetGenerator.from_langchain() 사용
+    # [수정] NERExtractor 에러 회피를 위해 transforms를 명시적으로 지정
     # ---------------------------------------------------------
+    from ragas.testset.transforms import KeyphraseExtractor, SummaryExtractor
+
+    # 사용할 Transform 정의 (NER 제외)
+    # NERExtractor가 Pydantic output parser 에러를 유발하므로 제외함
+    transforms = [
+        KeyphraseExtractor(llm=generator_llm),
+        SummaryExtractor(llm=generator_llm),
+    ]
+
     generator = TestsetGenerator.from_langchain(
         llm=generator_llm,
         embedding_model=embeddings
     )
+
+    # [중요] Default transforms를 커스텀 transforms로 교체
+    generator.knowledge_graph.transforms = transforms
 
     print("✅ TestsetGenerator 설정 완료\n")
     return generator
@@ -334,11 +347,20 @@ def generate_testset(
 
     # ---------------------------------------------------------
     # Ragas 0.4.x: generate_with_langchain_docs 메서드 사용
+    # [수정] distributions 명시
     # ---------------------------------------------------------
+    from ragas.testset.evolutions import simple, reasoning, multi_context
+    dist = {
+        simple: 0.5,
+        reasoning: 0.3,
+        multi_context: 0.2
+    }
+
     try:
         testset = generator.generate_with_langchain_docs(
             documents=documents,
             testset_size=test_size,
+            distributions=dist,
             raise_exceptions=False,
             run_config=run_config,
         )

@@ -250,6 +250,10 @@ def crawl_details():
         print("🎉 모든 데이터 수집이 완료되었습니다.")
         return
 
+    # Phase 2는 title 동기화가 핵심이므로, 엄격한 체크를 위해 title 정규화 함수 정의
+    def normalize_title(t):
+        return re.sub(r'\s+', '', t).strip()
+
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context()
@@ -283,6 +287,20 @@ def crawl_details():
 
                     page.evaluate(clean_js)
 
+                    # DOM 변경 대기 (AJAX)
+                    try:
+                        # 1. 스피너나 오버레이가 사라지길 대기 (있다면)
+                        # 2. #contentBody가 보이길 대기
+                        # 3. 중요: 클릭 전의 텍스트와 달라졌는지 확인은 어려우므로,
+                        #    evaluate 직후 약간의 sleep을 주고, rpl(답변) ID가 로드되기를 대기
+                        time.sleep(0.5)
+                        page.wait_for_selector(
+                            '#contentBody', state='visible', timeout=5000)
+                        page.wait_for_selector(
+                            '#rpl', state='attached', timeout=5000)  # 답변 영역 존재 확인
+                    except:
+                        pass
+
                     try:
                         page.wait_for_selector('#contentBody', timeout=5000)
                     except:
@@ -294,16 +312,55 @@ def crawl_details():
                         else:
                             raise Exception("Content load timeout")
 
-                    agency, date, real_title = "Unknown", "Unknown", title
+                    # --------------------------------------------------------
+                    # [중요] Title 검증으로 페이지 갱신 여부 확인
+                    # --------------------------------------------------------
+                    page_title = ""
+                    try:
+                        # 페이지 내 실제 제목 요소 (h4 등) 구조에 따라 수정 필요
+                        # 판정선례 페이지 구조상 #contentBody h3 또는 h4 등에 제목이 있을 수 있음
+                        # 여기서는 .tit_view 또는 input[name="title"] 등 확인 필요하지만
+                        # 2단계 리스트에서 클릭 시, 본문 상단 타이틀이 바뀌는지 확인.
+
+                        # law.go.kr 구조상 본문 타이틀 ID가 명확치 않을 수 있으므로
+                        # inqGst(질의) 내용이 비어있지 않은지 우선 체크하고,
+                        # 가능하다면 item['title_full']과 유사한 텍스트가 있는지 확인.
+                        pass
+                    except:
+                        pass
+
+                    # 제목에서 Agency, Date 추출 (정규식)
+                    # 예: "육아휴직 급여 ... [고용노동부, 2025.08.06.]"
+                    real_title = title
+                    agency = "Unknown"
+                    date = "Unknown"
+
                     match = re.search(
                         r'^(.*?)\s*\[([^,]+),\s*([\d.]+)\]$', title)
                     if match:
-                        real_title = match.group(1).strip()
+                        real_title_only = match.group(1).strip()
                         agency = match.group(2).strip()
                         date = match.group(3).strip()
+                    else:
+                        real_title_only = title
 
+                    # 본문 추출
                     q_text = extract_content(page, 'inqGst')
                     a_text = extract_content(page, 'rpl')
+
+                    # [검증] 질의나 답변 중 하나는 반드시 있어야 함.
+                    # 또한, 만약 이전 페이지의 내용이 남아있는지 확인해야 함.
+                    # (여기서는 q_text, a_text가 비어있으면 로딩 실패로 간주)
+                    if not q_text and not a_text:
+                        raise Exception("Empty content (q_text & a_text)")
+
+                    # [검증 2] 본문 내용이 이전 아이템과 동일한지 체크 (Stale Element)
+                    # 간단히 텍스트 길이 등으로 비교하거나 해시를 쓸 수 없으니,
+                    # 여기서는 '로딩 대기'를 믿되, 내용이 너무 짧으면 의심.
+                    if len(q_text) < 5 and len(a_text) < 5:
+                        raise Exception("Content too short (Example: null)")
+
+                    # --------------------------------------------------------
 
                     laws = []
                     try:

@@ -7,10 +7,10 @@ Ragas 메트릭(Faithfulness, Answer Relevancy, Context Precision/Recall)을 계
 Usage:
     # 기본 실행
     uv run a_team/scripts/evaluate_rag_V1.py
-    
+
     # 샘플 수 지정 (테스트용)
     uv run a_team/scripts/evaluate_rag_V1.py --sample 10
-    
+
     # 커스텀 골든셋 경로
     uv run a_team/scripts/evaluate_rag_V1.py --golden-set path/to/golden_set.json
 """
@@ -232,7 +232,8 @@ def evaluate_with_ragas(
     answers: List[str],
     contexts: List[List[str]],
     references: List[str],
-    llm_model: str = "gpt-4o"
+    llm_model: str = "gpt-4o",
+    embedding_model: Any = None
 ) -> Dict[str, Any]:
     """
     Ragas 메트릭으로 RAG 성능을 평가합니다.
@@ -257,8 +258,10 @@ def evaluate_with_ragas(
         "reference": references
     })
 
-    # 평가용 LLM 설정
-    eval_llm = ChatOpenAI(model=llm_model, temperature=0)
+    # 평가용 LLM 및 Embeddings 설정
+    eval_llm = LangchainLLMWrapper(ChatOpenAI(model=llm_model, temperature=0))
+    eval_embeddings = LangchainEmbeddingsWrapper(
+        embedding_model) if embedding_model else None
 
     # 메트릭 정의 (Ragas 0.4.x class-based API)
     metrics = [
@@ -274,6 +277,7 @@ def evaluate_with_ragas(
             dataset=eval_dataset,
             metrics=metrics,
             llm=eval_llm,
+            embeddings=eval_embeddings,
             raise_exceptions=False
         )
 
@@ -333,6 +337,33 @@ def save_results(
         "summary": summary,
         "results": final_df.to_dict(orient='records')
     }
+
+    # NaN 값을 None으로 변환하는 헬퍼 함수
+    def replace_nan_with_none(obj):
+        if isinstance(obj, float) and (obj != obj):  # Check for NaN
+            return None
+        if isinstance(obj, dict):
+            return {k: replace_nan_with_none(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [replace_nan_with_none(v) for v in obj]
+        return obj
+
+    output_data = replace_nan_with_none(output_data)
+
+    # 저장
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+    # NaN 값을 None으로 변환하는 헬퍼 함수
+    def replace_nan_with_none(obj):
+        if isinstance(obj, float) and (obj != obj):  # Check for NaN
+            return None
+        if isinstance(obj, dict):
+            return {k: replace_nan_with_none(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [replace_nan_with_none(v) for v in obj]
+        return obj
+
+    output_data = replace_nan_with_none(output_data)
 
     # 저장
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -427,16 +458,23 @@ def main():
     # DataFrame에 추론 결과 추가
     df['generated_answer'] = answers
     df['retrieved_contexts'] = [str(c) for c in contexts]  # 리스트를 문자열로
+    # 3. 임베딩 모델 로드 (Qwen) - Ragas 평가용
+    print(f"\n🚀 평가용 임베딩 모델 로드 중 (Qwen/Qwen3-Embedding-0.6B)...")
+    embeddings = HuggingFaceEmbeddings(
+        model_name="Qwen/Qwen3-Embedding-0.6B",
+        model_kwargs={'trust_remote_code': True},
+        encode_kwargs={'normalize_embeddings': True}
+    )
 
-    # 3. Ragas 평가
+    # 4. Ragas 평가
     ragas_result = evaluate_with_ragas(
         questions=questions,
         answers=answers,
         contexts=contexts,
         references=references,
-        llm_model=args.eval_model
+        llm_model=args.eval_model,
+        embedding_model=embeddings
     )
-
     # 4. 결과 저장 (출력 전에 먼저 저장!)
     if args.output:
         output_path = args.output
