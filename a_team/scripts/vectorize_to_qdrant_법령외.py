@@ -81,46 +81,29 @@ def chunk_text(text: str, chunk_size: int = 800, overlap: int = 100) -> List[str
 # Qdrant 클라이언트 클래스
 # ============================================================
 class LegalVectorDB:
-    def __init__(self, path: str = None, host: str = None, port: int = 6333, url: str = None, api_key: str = None):
+    def __init__(self, url: str, api_key: str):
         """
-        Qdrant 클라이언트 초기화
-        path: 로컬 저장 경로 (None이면 서버 모드)
-        host: 서버 호스트 (예: 'localhost')
-        port: 서버 포트 (기본 6333)
-        url: 클라우드 URL (host 대신 사용 가능)
-        api_key: 클라우드 접속용 API 키
+        Qdrant Cloud 클라이언트 초기화
+        
+        Args:
+            url: Qdrant Cloud URL
+            api_key: Qdrant Cloud API 키
         """
-        if url:
-            # 클라우드 접속 (API Key 필수)
-            print(f"Qdrant 클라우드 연결: {url}")
-            self.client = QdrantClient(url=url, api_key=api_key, timeout=60)
-        elif host:
-            # 로컬/서버 접속
-            self.client = QdrantClient(host=host, port=port, timeout=60)
-            print(f"Qdrant 서버 연결: {host}:{port}")
-        elif path:
-            # 로컬 파일 모드
-            os.makedirs(path, exist_ok=True)
-            self.client = QdrantClient(path=path)
-        else:
-            self.client = QdrantClient(":memory:")
+        print(f"Qdrant 클라우드 연결: {url}")
+        self.client = QdrantClient(url=url, api_key=api_key, timeout=60)
 
         print(f"임베딩 모델 로딩: {EMBEDDING_MODEL}")
         self.model = SentenceTransformer(EMBEDDING_MODEL)
         print("모델 로딩 완료")
 
-    def create_collection(self, name: str, recreate: bool = False):
-        """컬렉션 생성"""
+    def create_collection(self, name: str):
+        """컬렉션 생성 (없을 경우만)"""
         collections = [
             c.name for c in self.client.get_collections().collections]
 
         if name in collections:
-            if recreate:
-                print(f"컬렉션 '{name}' 삭제 후 재생성")
-                self.client.delete_collection(name)
-            else:
-                print(f"컬렉션 '{name}' 이미 존재")
-                return
+            print(f"컬렉션 '{name}' 이미 존재")
+            return
 
         self.client.create_collection(
             collection_name=name,
@@ -156,16 +139,16 @@ class LegalVectorDB:
             text_chunks = chunk_text(text, chunk_size=800, overlap=100)
             
             # 각 청크에 메타데이터 추가
-            for chunk_idx, chunk_text in enumerate(text_chunks):
+            for chunk_idx, chunk_str in enumerate(text_chunks):
                 chunk_metadata = {
                     **metadata,
                     'parent_doc_id': doc_idx,  # 원본 문서 ID
                     'chunk_index': chunk_idx,   # 청크 순서
                     'total_chunks': len(text_chunks),  # 전체 청크 수
-                    'chunk_length': len(chunk_text)
+                    'chunk_length': len(chunk_str)
                 }
                 all_chunks.append({
-                    'text': chunk_text,
+                    'text': chunk_str,
                     'metadata': chunk_metadata
                 })
         
@@ -253,26 +236,27 @@ def main():
     print("판례/행정해석 Qdrant 벡터 DB 구축")
     print("=" * 60)
 
-    # Qdrant 연결 (클라우드/로컬)
-    # 로컬 Docker 대신 Cloud URL 사용
+    # Qdrant Cloud 연결
     cloud_url = "https://75daa0f4-de48-4954-857a-1fbc276e298f.us-east4-0.gcp.cloud.qdrant.io/"
     api_key = os.getenv("QDRANT_API_KEY")
+    collection_name = os.getenv("QDRANT_COLLECTION_NAME")
 
-    if cloud_url and api_key:
-        db = LegalVectorDB(url=cloud_url, api_key=api_key)
-    else:
-        # API 키 없으면 로컬로 폴백
-        print("⚠️ QDRANT_API_KEY가 없어 로컬 Docker로 연결합니다.")
-        db = LegalVectorDB(host='localhost', port=6333)
+    if not api_key:
+        raise ValueError("❌ QDRANT_API_KEY 환경변수가 설정되지 않았습니다.")
+    
+    if not collection_name:
+        raise ValueError("❌ QDRANT_COLLECTION_NAME 환경변수가 설정되지 않았습니다.")
 
-    # A-TEAM 컬렉션 생성 (단일 컬렉션에 모든 데이터)
-    db.create_collection('A-TEAM', recreate=True)
+    db = LegalVectorDB(url=cloud_url, api_key=api_key)
+
+    # 컬렉션 생성 (없을 경우만)
+    db.create_collection(collection_name)
 
     # 모든 데이터 수집
     all_chunks = []
 
     # 1. 판례 데이터 로드
-    case_law_file = os.path.join(PROCESSED_DIR, "data_판례.json")
+    case_law_file = os.path.join(PROCESSED_DIR, "fd_법령외_판례.json")
     if os.path.exists(case_law_file):
         print(f"\n=== 판례 데이터 로드 중 ===")
         data = load_json(case_law_file)
@@ -282,7 +266,7 @@ def main():
         print(f"파일 없음: {case_law_file}")
 
     # 2. 행정해석 데이터 로드
-    interp_file = os.path.join(PROCESSED_DIR, "data_행정해석.json")
+    interp_file = os.path.join(PROCESSED_DIR, "fd_법령외_행정해석.json")
     if os.path.exists(interp_file):
         print(f"\n=== 행정해석 데이터 로드 중 ===")
         data = load_json(interp_file)
@@ -291,24 +275,34 @@ def main():
     else:
         print(f"파일 없음: {interp_file}")
 
+    # 3. 고용노동부 Q&A 데이터 로드
+    moel_qa_file = os.path.join(PROCESSED_DIR, "fd_법령외_고용노동부QA.json")
+    if os.path.exists(moel_qa_file):
+        print(f"\n=== 고용노동부 Q&A 데이터 로드 중 ===")
+        data = load_json(moel_qa_file)
+        all_chunks.extend(data)
+        print(f"고용노동부 Q&A {len(data)}개 문서 로드 완료")
+    else:
+        print(f"파일 없음: {moel_qa_file}")
+
     print(f"\n총 {len(all_chunks)}개 문서 로드 완료")
 
-    # 3. A-TEAM 컬렉션에 저장
-    print(f"\n=== A-TEAM 컬렉션에 저장 ===")
-    db.add_documents('A-TEAM', all_chunks)
+    # 컬렉션에 저장
+    print(f"\n=== '{collection_name}' 컬렉션에 저장 ===")
+    db.add_documents(collection_name, all_chunks)
 
-    # 4. 결과 요약
+    # 결과 요약
     print("\n" + "=" * 60)
     print("=== 저장 완료 ===")
     print("=" * 60)
 
-    info = db.get_collection_info('A-TEAM')
-    print(f"• A-TEAM: {info['points_count']}개 문서")
+    info = db.get_collection_info(collection_name)
+    print(f"• {collection_name}: {info['points_count']}개 문서")
 
-    # 5. 테스트 검색
+    # 테스트 검색
     print("\n=== 테스트 검색: '퇴직금 중간정산' ===")
     try:
-        results = db.search('A-TEAM', '퇴직금 중간정산', top_k=3)
+        results = db.search(collection_name, '퇴직금 중간정산', top_k=3)
         for i, r in enumerate(results, 1):
             print(f"\n[{i}] 점수: {r['score']:.3f}")
             print(
