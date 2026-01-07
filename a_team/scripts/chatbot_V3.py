@@ -1,3 +1,11 @@
+################################################
+# A-TEAM 법률 RAG 챗봇 (LangGraph V3)
+  # V2에서 Reranker 문서 개수 조정(3개 -> 5개)
+# 작성자 정보
+  # 작성자: SKN 3-1팀 A-TEAM
+  # 작성일: 2026-01-07
+################################################
+
 import os
 import warnings
 from pathlib import Path

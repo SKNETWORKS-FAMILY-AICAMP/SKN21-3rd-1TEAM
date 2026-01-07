@@ -1,3 +1,11 @@
+################################################
+# A-TEAM 법률 RAG 챗봇 (LangGraph V1)
+  # baseline 버전에서 LangGraph 기반으로 전면 개편
+# 작성자 정보
+  # 작성자: SKN 3-1팀 A-TEAM
+  # 작성일: 2026-01-07
+################################################
+
 import os
 import warnings
 from pathlib import Path
@@ -22,7 +30,6 @@ from langgraph.graph.message import add_messages
 # 환경 변수 로드: 실행 위치(CWD)와 무관하게 이 파일과 같은 폴더의 .env를 사용
 _DOTENV_PATH = Path(__file__).with_name(".env")
 load_dotenv(dotenv_path=_DOTENV_PATH)
-
 
 # ===========================
 # State 정의
