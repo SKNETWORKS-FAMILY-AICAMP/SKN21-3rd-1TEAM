@@ -30,10 +30,10 @@ from tqdm import tqdm
 # Ragas 평가 메트릭
 from ragas import evaluate
 from ragas.metrics import (
-    faithfulness,
-    answer_relevancy,
-    context_precision,
-    context_recall,
+    Faithfulness,
+    ResponseRelevancy,
+    LLMContextPrecisionWithoutReference,
+    LLMContextRecall,
 )
 from datasets import Dataset
 
@@ -179,7 +179,7 @@ def evaluate_with_ragas(
     answers: List[str],
     contexts: List[List[str]],
     references: List[str],
-    llm_model: str = "gpt-4o"
+    llm_model: str = "gpt-5.2"
 ) -> Dict[str, Any]:
     """
     Ragas 메트릭으로 RAG 성능을 평가합니다.
@@ -207,12 +207,12 @@ def evaluate_with_ragas(
     # 평가용 LLM 설정
     eval_llm = ChatOpenAI(model=llm_model, temperature=0)
 
-    # 메트릭 정의
+    # 메트릭 정의 (Ragas 0.4.x class-based API)
     metrics = [
-        faithfulness,
-        answer_relevancy,
-        context_precision,
-        context_recall,
+        Faithfulness(),
+        ResponseRelevancy(),
+        LLMContextPrecisionWithoutReference(),
+        LLMContextRecall(),
     ]
 
     # 평가 실행

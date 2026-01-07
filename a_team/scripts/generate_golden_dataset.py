@@ -38,14 +38,15 @@ load_dotenv()
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 
-def load_documents(data_dir: str, sources: list = None) -> list:
+def load_documents(data_dir: str) -> list:
     """
-    지정된 폴더에서 JSON, PDF, TXT 파일을 로드합니다.
+    지정된 폴더에서 JSON 파일을 로드합니다.
 
-    Args:
-        data_dir: 문서가 저장된 폴더 경로
-        sources: 로드할 소스 리스트 (예: ['qa', 'case', 'law'])
-                 None이면 모든 소스 로드
+    사용하는 파일:
+    - raw/rd_노동법.json, rd_민사법.json, rd_형사법.json (법령)
+    - processed/fd_법령외_고용노동부QA.json (고용노동부 Q&A)
+    - processed/fd_법령외_판례.json (판례)
+    - processed/fd_법령외_행정해석.json (행정해석)
 
     Returns:
         List of LangChain Document objects
@@ -61,146 +62,98 @@ def load_documents(data_dir: str, sources: list = None) -> list:
 
     print(f"📂 문서 로드 중: {data_dir}")
 
-    # 기본 소스: 모든 타입 로드
-    if sources is None:
-        sources = ['qa', 'case', 'law', 'interpretation']
+    # ==========================================================
+    # 1. processed 폴더: {text, metadata} 형식
+    # ==========================================================
+    processed_files = [
+        data_path / "processed" / "fd_법령외_고용노동부QA.json",
+        data_path / "processed" / "fd_법령외_판례.json",
+        data_path / "processed" / "fd_법령외_행정해석.json",
+    ]
 
-    # ---------------------------------------------------------
-    # 1. 고용노동부 FAQ (Q&A 형식)
-    # ---------------------------------------------------------
-    if 'qa' in sources:
-        qa_files = list(data_path.rglob('*고용노동부*QA*.json')) + \
-            list(data_path.rglob('*FAQ*.json'))
-        for filepath in qa_files:
-            try:
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
+    for filepath in processed_files:
+        if not filepath.exists():
+            print(f"  ⚠️ 파일 없음: {filepath.name}")
+            continue
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                data = json.load(f)
 
-                for item in data:
-                    question = item.get('question', '')
-                    answer = item.get('answer', '')
-                    if question and answer:
-                        text = f"[질의]\n{question}\n\n[회신]\n{answer}"
+            count = 0
+            for item in data:
+                text = item.get('text', '')
+                if text and len(text) > 30:
+                    metadata = item.get('metadata', {})
+                    doc = Document(
+                        page_content=text,
+                        metadata={
+                            'source': metadata.get('source', filepath.stem),
+                            'title': metadata.get('title', ''),
+                            'category': metadata.get('category', ''),
+                            'url': metadata.get('url', '')
+                        }
+                    )
+                    documents.append(doc)
+                    count += 1
+            print(f"  ✅ {filepath.name} → {count}개 문서")
+        except Exception as e:
+            print(f"  ⚠️ 로드 오류 ({filepath.name}): {e}")
+
+    # ==========================================================
+    # 2. raw 폴더: 법령 데이터 (새 구조)
+    #    {meta_info, body: [{article_text_full, ...}], addenda, tables}
+    # ==========================================================
+    law_files = [
+        data_path / "raw" / "rd_노동법.json",
+        data_path / "raw" / "rd_민사법.json",
+        data_path / "raw" / "rd_형사법.json",
+    ]
+
+    for filepath in law_files:
+        if not filepath.exists():
+            print(f"  ⚠️ 파일 없음: {filepath.name}")
+            continue
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            count = 0
+            for law in data:
+                # meta_info에서 법령 정보 추출
+                meta_info = law.get('meta_info', {})
+                law_name = meta_info.get('law_name', '')
+                category = meta_info.get('category', '')
+
+                # body에서 조문 추출
+                body = law.get('body', [])
+                for article in body:
+                    article_text = article.get('article_text_full', '')
+                    article_title = article.get('article_title', '')
+
+                    if article_text and len(article_text) > 30:
+                        text = f"[{law_name}] {article_title}\n\n{article_text}"
                         doc = Document(
                             page_content=text,
                             metadata={
-                                'source': 'qa',
-                                'title': item.get('title', ''),
-                                'category': item.get('category', ''),
-                                'url': item.get('url', '')
-                            }
-                        )
-                        documents.append(doc)
-                print(f"  ✅ Q&A: {filepath.name} → {len(data)}개")
-            except Exception as e:
-                print(f"  ⚠️ Q&A 로드 오류 ({filepath.name}): {e}")
-
-    # ---------------------------------------------------------
-    # 2. 주요판례 (판정사항/판정요지)
-    # ---------------------------------------------------------
-    if 'case' in sources:
-        case_files = list(data_path.rglob('*주요판례*.json')) + \
-            list(data_path.rglob('*판례*.json'))
-        for filepath in case_files:
-            try:
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-
-                count = 0
-                for item in data:
-                    판정사항 = item.get('판정사항', '')
-                    판정요지 = item.get('판정요지', '')
-                    if 판정사항 and 판정요지:
-                        text = f"[판정사항]\n{판정사항}\n\n[판정요지]\n{판정요지}"
-                        doc = Document(
-                            page_content=text,
-                            metadata={
-                                'source': 'case',
-                                'title': item.get('제목', ''),
-                                'category': item.get('자료구분', ''),
-                                'department': item.get('담당부서', ''),
-                                'reg_date': item.get('등록일', '')
+                                'source': 'law',
+                                'law_name': law_name,
+                                'law_id': meta_info.get('law_id', ''),
+                                'article_no': article.get('article_no', ''),
+                                'article_title': article_title,
+                                'category': category,
+                                'enforce_date': meta_info.get('enforce_date', ''),
+                                'revision_type': meta_info.get('revision_type', '')
                             }
                         )
                         documents.append(doc)
                         count += 1
-                print(f"  ✅ 판례: {filepath.name} → {count}개")
-            except Exception as e:
-                print(f"  ⚠️ 판례 로드 오류 ({filepath.name}): {e}")
+            print(f"  ✅ {filepath.name} → {count}개 조문")
+        except Exception as e:
+            print(f"  ⚠️ 법령 로드 오류 ({filepath.name}): {e}")
 
-    # ---------------------------------------------------------
-    # 3. 법령 데이터 (조문 단위)
-    # ---------------------------------------------------------
-    if 'law' in sources:
-        law_files = list(data_path.rglob('rd_노동법.json')) + \
-            list(data_path.rglob('rd_민사법.json')) + \
-            list(data_path.rglob('rd_형사법.json'))
-        for filepath in law_files:
-            try:
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-
-                count = 0
-                for law in data:
-                    law_title = law.get('title', '')
-                    articles = law.get('articles', [])
-                    for article in articles:
-                        content = article.get('content', '')
-                        if content and len(content) > 20:
-                            text = f"[{law_title}]\n{content}"
-                            doc = Document(
-                                page_content=text,
-                                metadata={
-                                    'source': 'law',
-                                    'law_title': law_title,
-                                    'article_num': article.get('article_num', ''),
-                                    'category': law.get('category', '')
-                                }
-                            )
-                            documents.append(doc)
-                            count += 1
-                print(f"  ✅ 법령: {filepath.name} → {count}개 조문")
-            except Exception as e:
-                print(f"  ⚠️ 법령 로드 오류 ({filepath.name}): {e}")
-
-    # ---------------------------------------------------------
-    # 4. 행정해석 (파싱된 Q&A)
-    # ---------------------------------------------------------
-    if 'interpretation' in sources:
-        interp_files = list(data_path.rglob('data_행정해석*.json')) + \
-            list(data_path.rglob('*행정해석*.json'))
-        for filepath in interp_files:
-            try:
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-
-                count = 0
-                for item in data:
-                    parsed = item.get('parsed', {})
-                    if parsed.get('parse_success'):
-                        questions = parsed.get('questions', [])
-                        answers = parsed.get('answers', [])
-                        for q, a in zip(questions, answers):
-                            if q and a:
-                                text = f"[질의]\n{q}\n\n[회신]\n{a}"
-                                doc = Document(
-                                    page_content=text,
-                                    metadata={
-                                        'source': 'interpretation',
-                                        'title': item.get('title', ''),
-                                        'department': item.get('department', ''),
-                                        'reg_date': item.get('reg_date', '')
-                                    }
-                                )
-                                documents.append(doc)
-                                count += 1
-                print(f"  ✅ 행정해석: {filepath.name} → {count}개 Q&A")
-            except Exception as e:
-                print(f"  ⚠️ 행정해석 로드 오류 ({filepath.name}): {e}")
-
-    # ---------------------------------------------------------
-    # 5. PDF/TXT 파일 (기존 로직)
-    # ---------------------------------------------------------
+    # ==========================================================
+    # 3. PDF 파일
+    # ==========================================================
     try:
         pdf_loader = DirectoryLoader(
             path=str(data_path),
@@ -215,23 +168,7 @@ def load_documents(data_dir: str, sources: list = None) -> list:
             print(f"  ✅ PDF: {len(pdf_docs)}개 페이지")
         documents.extend(pdf_docs)
     except Exception as e:
-        pass  # PDF 없으면 조용히 넘어감
-
-    try:
-        txt_loader = DirectoryLoader(
-            path=str(data_path),
-            glob="**/*.txt",
-            loader_cls=TextLoader,
-            loader_kwargs={"encoding": "utf-8"},
-            show_progress=False,
-            silent_errors=True
-        )
-        txt_docs = txt_loader.load()
-        if txt_docs:
-            print(f"  ✅ TXT: {len(txt_docs)}개 문서")
-        documents.extend(txt_docs)
-    except Exception as e:
-        pass  # TXT 없으면 조용히 넘어감
+        pass
 
     print(f"\n📄 총 {len(documents)}개 문서 로드 완료\n")
     return documents
