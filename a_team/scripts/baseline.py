@@ -1,5 +1,4 @@
 import os
-import json
 import warnings
 from pathlib import Path
 from dotenv import load_dotenv
@@ -63,13 +62,14 @@ def initialize_rag_chatbot():
     )
     print("✅ 벡터스토어 초기화 완료")
 
-    # 5. Retriever 생성 (검색 결과 5개)
+    # 5. Retriever 생성
     print(f"\n🔍 Retriever 생성 중...")
+    retrieval_k = 5  # 상위 5개 유사 문서 검색
     retriever = vectorstore.as_retriever(
         search_type="similarity",
-        search_kwargs={"k": 5}  # 상위 5개 유사 문서 검색
+        search_kwargs={"k": retrieval_k}
     )
-    print("✅ Retriever 생성 완료")
+    print(f"✅ Retriever 생성 완료 (k={retrieval_k})")
 
     # 6. Retriever를 Tool로 변환
     print(f"\n🛠️  Tool 생성 중...")
@@ -78,8 +78,8 @@ def initialize_rag_chatbot():
     def legal_search_tool(query: str) -> str:
         """법률/판례/행정해석을 Qdrant에서 검색해 관련 문서를 반환합니다."""
 
-        k = int(os.getenv("RETRIEVAL_K", "5"))
-        max_chars = int(os.getenv("RETRIEVAL_DOC_CHARS", "1200"))
+        k = 5  # 검색 결과 개수
+        max_chars = 1200  # 문서당 최대 문자 수
 
         results = vectorstore.similarity_search_with_score(query, k=k)
         if not results:
@@ -87,8 +87,13 @@ def initialize_rag_chatbot():
 
         lines = []
         for i, (doc, score) in enumerate(results, start=1):
-            doc_id = doc.metadata.get("_id", "")
-            lines.append(f"[문서 {i}] score={score:.4f} id={doc_id}")
+            # 메타데이터 추출
+            metadata = doc.metadata
+            source = metadata.get("source", "unknown")
+            title = metadata.get("title", "")
+            chunk_info = f"청크 {metadata.get('chunk_index', 0)+1}/{metadata.get('total_chunks', 1)}"
+            
+            lines.append(f"[문서 {i}] score={score:.4f} | {source} | {title} | {chunk_info}")
 
             content = (doc.page_content or "").strip()
             if content:
@@ -107,7 +112,7 @@ def initialize_rag_chatbot():
     # 7. LLM 설정 (OpenAI GPT-4o-mini)
     print(f"\n🤖 LLM 설정 중...")
     llm = ChatOpenAI(
-        model="gpt-5.2",
+        model="gpt-4o-mini",
         temperature=0,  # 일관된 답변을 위해 temperature=0
         streaming=True
     )
@@ -174,7 +179,7 @@ def main():
         print("✅ 🤖 A-TEAM 법률 챗봇 준비 완료!")
         print("="*60)
         print("\n💡 사용 방법:")
-        print("  - 법률 관련 질문을 입력하세요")
+        print("  - 노동분야 법률, 형사법, 민사법 관련 질문에 응답할 수 있습니다.")
         print("  - 'exit', 'quit', '종료'를 입력하면 종료됩니다")
         print("="*60 + "\n")
 
