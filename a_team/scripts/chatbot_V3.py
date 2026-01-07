@@ -54,7 +54,7 @@ class AgentState(TypedDict):
 # ===========================
 class JinaReranker(BaseDocumentCompressor):
     model_name: str = "jinaai/jina-reranker-v2-base-multilingual"
-    top_n: int = 3
+    top_n: int = 5
     model: Any = None
     tokenizer: Any = None
 
@@ -218,9 +218,9 @@ def create_search_node(vectorstore: QdrantVectorStore):
             docs = [doc for doc, score in results]
 
             # 2. 리랭킹 (Jina Reranker)
-            print(f"🔄 [리랭킹] Jina Reranker로 상위 3개 문서 선별 중...")
+            print(f"🔄 [리랭킹] Jina Reranker로 상위 5개 문서 선별 중...")
             try:
-                reranker = JinaReranker(top_n=3)
+                reranker = JinaReranker(top_n=5)
                 reranked_docs = reranker.compress_documents(docs, query)
 
                 if reranked_docs:
