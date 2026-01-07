@@ -15,7 +15,6 @@ from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
 _DOTENV_PATH = Path(__file__).with_name(".env")
 load_dotenv(dotenv_path=_DOTENV_PATH)
 
-
 def initialize_rag_chatbot():
     """로컬 Qdrant 기반 RAG 챗봇 초기화"""
     

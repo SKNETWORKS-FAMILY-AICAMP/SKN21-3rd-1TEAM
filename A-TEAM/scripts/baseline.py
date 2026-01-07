@@ -28,8 +28,8 @@ def initialize_rag_chatbot():
     QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
     
     print(f"🔧 설정 로드 완료")
-    print(f"  - Qdrant Host: {QDRANT_HOST}:{QDRANT_PORT}")
-    print(f"  - Collection: {COLLECTION_NAME}")
+    # print(f"  - Qdrant Host: {QDRANT_HOST}:{QDRANT_PORT}")
+    # print(f"  - Collection: {COLLECTION_NAME}")
     
     # 2. 임베딩 모델 설정
     print(f"\n🚀 임베딩 모델 로드 중 (Qwen/Qwen3-Embedding-0.6B)...")
@@ -45,11 +45,10 @@ def initialize_rag_chatbot():
     warnings.filterwarnings('ignore', message='Api key is used with an insecure connection')
     
     client = QdrantClient(
-        url=f"http://{QDRANT_HOST}:{QDRANT_PORT}",
+        url="https://75daa0f4-de48-4954-857a-1fbc276e298f.us-east4-0.gcp.cloud.qdrant.io/",
         api_key=QDRANT_API_KEY,
         timeout=30,
-        prefer_grpc=False
-    )
+        prefer_grpc=False)
     print("✅ Qdrant 연결 완료")
     
     # 4. 벡터스토어 생성
@@ -107,7 +106,7 @@ def initialize_rag_chatbot():
     # 7. LLM 설정 (OpenAI GPT-4o-mini)
     print(f"\n🤖 LLM 설정 중...")
     llm = ChatOpenAI(
-        model="gpt-4o-mini",
+        model="gpt-5.2",
         temperature=0,  # 일관된 답변을 위해 temperature=0
         streaming=True
     )
