@@ -296,6 +296,16 @@ def main():
     else:
         print(f"파일 없음: {qa_resp_file}")
 
+    # 5. 결정선례 데이터 로드
+    decision_file = os.path.join(PROCESSED_DIR, "fd_법령외_결정선례.json")
+    if os.path.exists(decision_file):
+        print(f"\n=== 결정선례 데이터 로드 중 ===")
+        data = load_json(decision_file)
+        all_chunks.extend(data)
+        print(f"결정선례 {len(data)}개 문서 로드 완료")
+    else:
+        print(f"파일 없음: {decision_file}")
+
     print(f"\n총 {len(all_chunks)}개 문서 로드 완료")
 
     # 컬렉션에 저장

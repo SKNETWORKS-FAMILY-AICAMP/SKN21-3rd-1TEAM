@@ -12,7 +12,7 @@ Usage:
     uv run a_team/scripts/evaluate_rag.py --sample 10
     
     # 커스텀 골든셋 경로
-    uv run a_team/scripts/evaluate_rag.py --golden-set path/to/golden_set.csv
+    uv run a_team/scripts/evaluate_rag.py --golden-set a_team/data/evaluation/golden_set_quota_20.json
 """
 
 import os
@@ -35,10 +35,13 @@ from ragas.metrics import (
     LLMContextPrecisionWithoutReference,
     LLMContextRecall,
 )
+from ragas.embeddings import LangchainEmbeddingsWrapper
+from ragas.llms import LangchainLLMWrapper
 from datasets import Dataset
 
 # LangChain
 from langchain_openai import ChatOpenAI
+from langchain_huggingface import HuggingFaceEmbeddings
 
 # 환경변수 로드
 _SCRIPT_DIR = Path(__file__).parent
@@ -182,7 +185,8 @@ def evaluate_with_ragas(
     answers: List[str],
     contexts: List[List[str]],
     references: List[str],
-    llm_model: str = "gpt-5.2"
+    llm_model: str = "gpt-4o-mini",
+    embedding_model: Any = None
 ) -> Dict[str, Any]:
     """
     Ragas 메트릭으로 RAG 성능을 평가합니다.
@@ -193,6 +197,7 @@ def evaluate_with_ragas(
         contexts: 검색된 컨텍스트 리스트
         references: 정답(Ground Truth) 리스트
         llm_model: 평가에 사용할 LLM 모델
+        embedding_model: 평가에 사용할 임베딩 모델
 
     Returns:
         평가 결과 딕셔너리
@@ -207,8 +212,10 @@ def evaluate_with_ragas(
         "reference": references
     })
 
-    # 평가용 LLM 설정
-    eval_llm = ChatOpenAI(model=llm_model, temperature=0)
+    # 평가용 LLM 및 Embeddings 설정
+    eval_llm = LangchainLLMWrapper(ChatOpenAI(model=llm_model, temperature=0))
+    eval_embeddings = LangchainEmbeddingsWrapper(
+        embedding_model) if embedding_model else None
 
     # 메트릭 정의 (Ragas 0.4.x class-based API)
     metrics = [
@@ -224,6 +231,7 @@ def evaluate_with_ragas(
             dataset=eval_dataset,
             metrics=metrics,
             llm=eval_llm,
+            embeddings=eval_embeddings,
             raise_exceptions=False
         )
 
@@ -301,7 +309,7 @@ def main():
     parser.add_argument(
         '--golden-set',
         type=str,
-        default='a_team/data/evaluation/labor_law_golden_set.json',
+        default='a_team/data/evaluation/golden_set_quota_10.json',
         help='Golden Dataset JSON 경로'
     )
     parser.add_argument(
@@ -319,7 +327,7 @@ def main():
     parser.add_argument(
         '--eval-model',
         type=str,
-        default='gpt-4o',
+        default='gpt-4o-mini',
         help='Ragas 평가에 사용할 LLM 모델'
     )
     parser.add_argument(
@@ -368,13 +376,22 @@ def main():
     df['generated_answer'] = answers
     df['retrieved_contexts'] = [str(c) for c in contexts]  # 리스트를 문자열로
 
-    # 3. Ragas 평가
+    # 3. 임베딩 모델 로드 (Qwen) - Ragas 평가용
+    print(f"\n🚀 평가용 임베딩 모델 로드 중 (Qwen/Qwen3-Embedding-0.6B)...")
+    embeddings = HuggingFaceEmbeddings(
+        model_name="Qwen/Qwen3-Embedding-0.6B",
+        model_kwargs={'trust_remote_code': True},
+        encode_kwargs={'normalize_embeddings': True}
+    )
+
+    # 4. Ragas 평가
     ragas_result = evaluate_with_ragas(
         questions=questions,
         answers=answers,
         contexts=contexts,
         references=references,
-        llm_model=args.eval_model
+        llm_model=args.eval_model,
+        embedding_model=embeddings
     )
 
     # 4. 결과 저장 (출력 전에 먼저 저장!)

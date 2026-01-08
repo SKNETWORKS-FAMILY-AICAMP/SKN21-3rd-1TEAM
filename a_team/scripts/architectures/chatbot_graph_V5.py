@@ -1,0 +1,473 @@
+################################################
+# A-TEAM 법률 RAG 챗봇 (LangGraph V5)
+  # 벡터 검색 + BM25 하이브리드 검색
+  # Jina Reranker 기반 문서 리랭킹
+  # 판례 웹 검색 통합 (Tavily)
+  # 답변 분석 과정 삭제
+  # 답변 생성 노드 프롬프트 개선
+# 작성자 정보
+  # 작성자: SKN 3-1팀 A-TEAM
+  # 작성일: 2026-01-08
+################################################
+
+import os
+import re
+import warnings
+from pathlib import Path
+from typing import Annotated, TypedDict, Sequence, Optional, List, Literal, Any
+from dotenv import load_dotenv
+
+from qdrant_client import QdrantClient
+from langchain_qdrant import QdrantVectorStore
+from langchain_huggingface import HuggingFaceEmbeddings
+from whoosh.index import open_dir
+from whoosh.qparser import QueryParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.messages import BaseMessage, HumanMessage
+from langchain_openai import ChatOpenAI
+from langchain_core.documents import Document, BaseDocumentCompressor
+from langchain_core.retrievers import BaseRetriever
+from pydantic import Field
+import torch
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+
+from langgraph.graph import StateGraph, END
+from langgraph.graph.message import add_messages
+
+_DOTENV_PATH = Path(__file__).with_name(".env")
+load_dotenv(dotenv_path=_DOTENV_PATH)
+
+# LangSmith 추적 상태 확인 및 출력
+_langsmith_tracing = os.getenv("LANGCHAIN_TRACING_V2", "").lower() in ["true", "1", "yes"]
+_langsmith_project = os.getenv("LANGCHAIN_PROJECT", "default")
+if _langsmith_tracing:
+    print(f"✅ LangSmith 추적 활성화됨 (프로젝트: {_langsmith_project})")
+else:
+    print("⚠️  LangSmith 추적이 비활성화되어 있습니다.")
+
+
+class AgentState(TypedDict):
+    messages: Annotated[Sequence[BaseMessage], add_messages]
+    user_query: str
+    retrieved_docs: Optional[List[Document]]
+    generated_answer: Optional[str]
+
+
+class BM25KeywordRetriever(BaseRetriever):
+    """LangChain BaseRetriever를 상속한 BM25/keyword 기반 검색기 (Whoosh 사용)"""
+    index_dir: str
+    content_field: str = "text"
+    k: int = 5
+    ix: Any = Field(default=None, exclude=True)
+    parser: Any = Field(default=None, exclude=True)
+
+    model_config = {"arbitrary_types_allowed": True}
+
+    def model_post_init(self, __context: Any) -> None:
+        """Pydantic V2 방식의 초기화"""
+        super().model_post_init(__context)
+        self.ix = open_dir(self.index_dir)
+        self.parser = QueryParser(self.content_field, schema=self.ix.schema)
+
+    def _get_relevant_documents(self, query: str) -> List[Document]:
+        """LangChain Retriever 표준 메서드 구현"""
+        with self.ix.searcher() as searcher:
+            q = self.parser.parse(query)
+            results = searcher.search(q, limit=self.k)
+            docs = []
+            for hit in results:
+                docs.append(Document(
+                    page_content=hit[self.content_field],
+                    metadata=dict(hit)
+                ))
+            return docs
+
+
+class JinaReranker(BaseDocumentCompressor):
+    model_name: str = "jinaai/jina-reranker-v2-base-multilingual"
+    top_n: int = 6
+    model: Any = None
+    tokenizer: Any = None
+
+    model_config = {"arbitrary_types_allowed": True, "extra": "allow"}
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
+        self.model = AutoModelForSequenceClassification.from_pretrained(
+            self.model_name, trust_remote_code=True, dtype="auto"
+        )
+        self.model.eval()
+
+    def compress_documents(self, documents: Sequence[Document], query: str, callbacks: Optional[Any] = None) -> Sequence[Document]:
+        if not documents:
+            return []
+
+        pairs = [[query, doc.page_content] for doc in documents]
+        with torch.no_grad():
+            inputs = self.tokenizer(pairs, padding=True, truncation=True, return_tensors="pt", max_length=512)
+            scores = self.model(**inputs).logits.squeeze(-1).float().cpu()
+            scores = torch.sigmoid(scores).tolist()
+            if not isinstance(scores, list):
+                scores = [scores]
+
+        top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[: self.top_n]
+        final_docs = []
+        for i in top_indices:
+            doc = documents[i]
+            doc.metadata["relevance_score"] = scores[i]
+            final_docs.append(doc)
+        return final_docs
+
+
+# ----------------------------
+# 검색 관련 헬퍼
+# ----------------------------
+def expand_queries(query: str) -> List[str]:
+    variants = {query.strip()}
+    # 조사/불용어 일부 제거 시도
+    compact = re.sub(r"[\s]+", " ", query).strip()
+    variants.add(compact)
+    # 괄호/슬래시 제거 버전
+    variants.add(re.sub(r"[()\[\]/]", " ", compact))
+    # 영어 질문 대응: 한국어 번역 힌트가 없다면 그대로 사용
+    return [v for v in variants if v]
+
+
+def dedup_documents(docs: List[Document]) -> List[Document]:
+    seen = set()
+    unique = []
+    for doc in docs:
+        key = doc.metadata.get("id") or (doc.metadata.get("source"), doc.metadata.get("law_name"), doc.metadata.get("article_no"), doc.page_content[:80])
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(doc)
+    return unique
+
+
+def format_context_snippets(docs: List[Document], max_docs: int = 5, max_chars: int = 500) -> str:
+    parts = []
+    for i, doc in enumerate(docs[:max_docs], 1):
+        meta = doc.metadata or {}
+        law_name = meta.get("law_name", "")
+        article = meta.get("article_no", "")
+        title = meta.get("article_title") or meta.get("title", "")
+        source = meta.get("source", "")
+        snippet = doc.page_content[: max_chars].strip()
+        header = f"[근거 {i}]"
+        if law_name:
+            header += f" {law_name}"
+            if article:
+                header += f" 제{article}조"
+        if title:
+            header += f" - {title}"
+        if source and not law_name:
+            header += f" ({source})"
+        parts.append(f"{header}\n{snippet}\n")
+    return "\n".join(parts) if parts else "(관련 법령 문서가 검색되지 않았습니다)"
+
+
+def create_search_node(vectorstore: QdrantVectorStore):
+    # BM25 인덱스 경로는 환경변수 또는 고정값 사용
+    BM25_INDEX_DIR = os.getenv("BM25_INDEX_DIR", "whoosh_index")
+    try:
+        bm25_retriever = BM25KeywordRetriever(index_dir=BM25_INDEX_DIR)
+        print(f"✅ BM25/keyword 인덱스 로드 완료: {BM25_INDEX_DIR}")
+    except Exception as e:
+        print(f"⚠️  BM25 인덱스 로드 실패: {e}")
+        bm25_retriever = None
+
+
+    def search_documents(state: AgentState) -> AgentState:
+        query = state["user_query"]
+        print(f"🔍 [법령 검색] 쿼리: {query[:50]}...")
+
+        variants = expand_queries(query)
+        all_docs: List[Document] = []
+        vector_scores = []
+        # 1. 벡터 검색 (cosine similarity)
+        for q in variants:
+            try:
+                # score가 필요하므로 similarity_search_with_score 사용
+                res = vectorstore.similarity_search_with_score(q, k=10)
+                all_docs.extend([doc for doc, score in res])
+                vector_scores.extend([score for doc, score in res])
+            except Exception as e:
+                print(f"⚠️  [벡터 검색 오류] {e}")
+
+        # 벡터 검색 결과가 있고, 모든 score가 0.5 이하라면 쿼리 변형 후 재검색 시도
+        if vector_scores and all(s <= 0.5 for s in vector_scores):
+            print("⚠️  [벡터 유사도 0.5 이하, 쿼리 변형 후 재검색]")
+            # 쿼리에서 불용어 제거, 괄호/특수문자 제거 등 추가 변형 가능
+            # 이미 expand_queries에서 일부 변형을 했으므로, 여기서는 원 쿼리의 단어만 추출해 재검색 예시
+            import re
+            keywords = re.findall(r"[\w가-힣]+", query)
+            simple_query = " ".join(keywords)
+            retry_variants = expand_queries(simple_query)
+            all_docs = []
+            vector_scores = []
+            for q in retry_variants:
+                try:
+                    res = vectorstore.similarity_search_with_score(q, k=10)
+                    all_docs.extend([doc for doc, score in res])
+                    vector_scores.extend([score for doc, score in res])
+                except Exception as e:
+                    print(f"⚠️  [벡터 재검색 오류] {e}")
+            # BM25도 재검색
+            if bm25_retriever:
+                for q in retry_variants:
+                    try:
+                        bm25_docs = bm25_retriever.get_relevant_documents(q)
+                        all_docs.extend(bm25_docs)
+                    except Exception as e:
+                        print(f"⚠️  [BM25 재검색 오류] {e}")
+        else:
+            # 2. BM25/keyword 검색 (하이브리드)
+            if bm25_retriever:
+                for q in variants:
+                    try:
+                        bm25_docs = bm25_retriever.get_relevant_documents(q)
+                        all_docs.extend(bm25_docs)
+                    except Exception as e:
+                        print(f"⚠️  [BM25 검색 오류] {e}")
+
+        all_docs = dedup_documents(all_docs)
+        if not all_docs:
+            print("⚠️  [검색 결과 없음]")
+            return {"retrieved_docs": []}
+
+
+        try:
+            reranker = JinaReranker(top_n=6)
+            reranked = reranker.compress_documents(all_docs, query)
+            if reranked:
+                docs = reranked[:6]
+                print(f"✅ [리랭킹 완료] {len(docs)}개 문서 선별")
+            else:
+                docs = all_docs[:6]
+                print("⚠️  [리랭킹 결과 없음] 원본 상위 6개 사용")
+        except Exception as e:
+            print(f"⚠️  [리랭킹 오류] {e}")
+            docs = all_docs[:6]
+
+        for i, d in enumerate(docs, 1):
+            print(f"   [{i}] score={d.metadata.get('relevance_score', 0):.4f} | {d.page_content[:40]}...")
+
+        return {"retrieved_docs": docs}
+
+    return search_documents
+
+
+def create_generate_node(llm):
+    answer_prompt = ChatPromptTemplate.from_messages([
+        (
+            "system",
+            """당신은 대한민국 노동 분야 법률, 형사법 법률, 민사법 법률에 대해 전문적으로 학습된 AI 도우미입니다.
+            사용자의 질문에 대해 저장된 법률 조항 데이터와 관련 정보(판례, 행정해석 등)를 기반으로 정확하고 신뢰성 있는 답변을 제공하세요.
+            1. 답변 작성 기본 지침 
+                - 법률 조항에 관한 질문이라면 그 조항에 관한 전체 내용을 가져온다.
+                - 예를 들어 '근로기준법 제1조의 내용'이라는 질문을 받으면 근로기준법 제1조의 조항을 전부 다 답변한다.
+                - 질문 유형에 따라 관련 정보를 구조적으로 작성하며, 중요 세법 조문과 요약된 내용을 포함합니다.
+                - 비전문가도 이해할 수 있도록 용어를 친절히 설명합니다.
+            2. 답변 작성 세부 지침:
+                - **간결성**: 답변은 간단하고 명확하게 작성하되, 법 조항에 관한 질문일 경우 관련 법 조문의 전문을 명시합니다.
+                - **구조화된 정보 제공**:
+                    - 세법 조항 번호, 세법 조항의 정의, 시행령, 관련 규정을 구체적으로 명시합니다.
+                    - 복잡한 개념은 예시를 들어 설명하거나, 단계적으로 안내합니다.
+                - **신뢰성 강조**:
+                    - 답변이 법적 조언이 아니라 정보 제공 목적임을 명확히 알립니다.
+                    - "이 답변은 세법 관련 정보를 바탕으로 작성되었으며, 구체적인 상황에 따라 전문가의 추가 조언이 필요할 수 있습니다."를 추가합니다.
+                - **정확성**:
+                    - 법령 및 법률에 관한질문은 추가적인 내용없이 한가지 content에 집중하여 답변한다.
+                    - 조항에 대한 질문은 시행령이나 시행규칙보단 해당법에서 가져오는것에 집중한다.
+            4. 예외 상황 처리:
+                - 사용자가 질문을 모호하게 작성한 경우:
+                    - "질문이 명확하지 않습니다. 구체적으로 어떤 부분을 알고 싶으신지 말씀해 주시겠어요?"와 같은 문구로 추가 정보를 요청합니다.
+                - 질문이 알고 있는 법률(노동 분야 법률, 형사법, 민사법)과 직접 관련이 없는 경우:
+                    - "이 질문은 제가 학습한 법률 범위를 벗어납니다."라고 알리고, 알고 있는 법률(노동 분야 법률, 형사법, 민사법)과 관련된 새로운 질문을 유도합니다.
+
+            5. 추가 지침:
+                - 개행문자 두 개 이상은 절대 사용하지 마세요.
+                - 질문 및 답변에서 사용된 세법 조문은 최신 데이터에 기반해야 합니다.
+                - 질문이 복합적인 경우, 각 하위 질문에 대해 별도로 답변하거나, 사용자에게 우선순위를 확인합니다.
+
+            6. 예시 답변 템플릿:
+                📋 "답변: ..."
+                    - "질문에 대한 답변"
+                💡 "추가 정보: ..."
+                    - "추가 정보 제시"
+                ⚖️ "관련 조항: ..."
+                    - "관련 조항 제시"
+                - 위는 "예시" 템플릿으로, 예정 답변이 템플릿과 일치하지 않을 경우 수정 가능합니다."""
+        ),
+        (
+            "user",
+            """다음은 검색된 법률 근거 자료입니다:
+
+{context}
+
+사용자 질문: {query}
+
+위 법률 근거를 바탕으로 사용자의 질문에 답변해주세요."""
+        ),
+    ])
+
+    def generate_answer(state: AgentState) -> AgentState:
+        query = state["user_query"]
+        docs = state.get("retrieved_docs", []) or []
+
+        print("💬 [답변 생성 중...]")
+
+        context = format_context_snippets(docs, max_docs=5, max_chars=500)
+
+        if not docs:
+            answer = "죄송합니다. 관련 근거를 찾지 못했습니다. 질문을 더 구체적으로 작성하거나 다른 키워드로 다시 시도해 주세요. 복잡한 사안이면 전문 법률 상담을 권장드립니다."
+        else:
+            chain = answer_prompt | llm
+            response = chain.invoke({"query": query, "context": context})
+            answer = response.content
+
+        print("✅ [답변 생성 완료]")
+        return {"generated_answer": answer}
+
+    return generate_answer
+
+
+def route_after_search(state: AgentState) -> Literal["generate"]:
+    return "generate"
+
+
+def initialize_resources():
+    COLLECTION_NAME = os.getenv("QDRANT_COLLECTION_NAME")
+    QDRANT_URL = os.getenv("QDRANT_URL")
+    QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+    if not QDRANT_API_KEY:
+        raise ValueError("QDRANT_API_KEY가 .env 파일에 설정되지 않았습니다!")
+    print("🔧 설정 로드 완료")
+    print("\n🚀 임베딩 모델 로드 중 (Qwen/Qwen3-Embedding-0.6B)...")
+    embeddings = HuggingFaceEmbeddings(
+        model_name="Qwen/Qwen3-Embedding-0.6B",
+        model_kwargs={"trust_remote_code": True},
+        encode_kwargs={"normalize_embeddings": True},
+    )
+    print("✅ 임베딩 모델 로드 완료")
+
+    print("\n📡 Qdrant 연결 중...")
+    warnings.filterwarnings("ignore", message="Api key is used with an insecure connection")
+    client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=30, prefer_grpc=False)
+    print("✅ Qdrant 연결 완료")
+
+    print("\n🗂️  벡터스토어 초기화 중...")
+    vectorstore = QdrantVectorStore(
+        client=client,
+        collection_name=COLLECTION_NAME,
+        embedding=embeddings,
+        content_payload_key="text",
+    )
+    print("✅ 벡터스토어 초기화 완료")
+    return {"embeddings": embeddings, "vectorstore": vectorstore}
+
+
+def initialize_langgraph_chatbot():
+    resources = initialize_resources()
+    vectorstore = resources["vectorstore"]
+
+    print("\n🤖 LLM 설정 중...")
+    llm = ChatOpenAI(model="gpt-4.1", temperature=0, streaming=True)
+    print("✅ LLM 설정 완료")
+
+    print("\n⚙️  LangGraph 노드 생성 중...")
+    search_node = create_search_node(vectorstore)
+    generate_node = create_generate_node(llm)
+    print("✅ 노드 생성 완료")
+
+    workflow = StateGraph(AgentState)
+    workflow.add_node("search", search_node)
+    workflow.add_node("generate", generate_node)
+
+    workflow.set_entry_point("search")
+    workflow.add_edge("search", "generate")
+    workflow.add_edge("generate", END)
+
+    graph = workflow.compile()
+    print("✅ LangGraph 구성 완료")
+    return graph
+
+
+def main():
+    if not os.getenv("OPENAI_API_KEY"):
+        print("❌ 오류: OPENAI_API_KEY가 설정되지 않았습니다.")
+        return
+    if not os.getenv("TAVILY_API_KEY"):
+        print("⚠️  경고: TAVILY_API_KEY가 설정되지 않았습니다. 판례 검색이 비활성화됩니다.\n")
+
+    try:
+        print("\n" + "=" * 60)
+        print("🚀 A-TEAM 법률 RAG 챗봇 (LangGraph V5) 초기화")
+        print("=" * 60 + "\n")
+
+        graph = initialize_langgraph_chatbot()
+
+        print("\n" + "=" * 60)
+        print("✅ 🤖 A-TEAM 법률 챗봇 준비 완료 (V5)")
+        print("=" * 60)
+        print("\n사용 방법: 노동법/형사법/민사법 질문에 답변, 모호하면 명확화 요청")
+        print("'exit', 'quit', '종료'로 종료합니다.\n")
+
+        while True:
+            try:
+                user_input = input("👤 User >> ").strip()
+                if user_input.lower() in ["exit", "quit", "종료", "q"]:
+                    print("\n👋 챗봇을 종료합니다. 감사합니다!")
+                    break
+                if not user_input:
+                    print("❌ 질문을 입력해주세요.\n")
+                    continue
+
+                initial_state = {
+                    "messages": [HumanMessage(content=user_input)],
+                    "user_query": user_input,
+                    "retrieved_docs": None,
+                    "generated_answer": None,
+                }
+
+                print("\n" + "-" * 60)
+                print("🔄 워크플로우 실행 중...")
+                print("-" * 60 + "\n")
+
+                # LangSmith 추적을 위한 config 설정
+                config = {
+                    "run_name": f"법률_RAG_질의_{user_input[:20]}",
+                    "tags": ["법률챗봇", "RAG", "LangGraph"],
+                }
+                
+                result = graph.invoke(initial_state, config=config)
+                answer = result.get("generated_answer", "")
+                if answer:
+                    print("\n" + "=" * 60)
+                    print("🤖 AI 답변:")
+                    print("=" * 60)
+                    print(f"\n{answer}\n")
+                    print("=" * 60 + "\n")
+                else:
+                    print("\n⚠️ 답변을 생성할 수 없습니다.\n")
+
+            except KeyboardInterrupt:
+                print("\n\n👋 챗봇을 종료합니다. 감사합니다!")
+                break
+            except Exception as e:
+                print(f"\n❌ 오류 발생: {e}")
+                print("💡 다시 시도해주세요.\n")
+                import traceback
+                traceback.print_exc()
+
+    except Exception as e:
+        print(f"\n❌ 챗봇 초기화 실패: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+
+
+if __name__ == "__main__":
+    main()

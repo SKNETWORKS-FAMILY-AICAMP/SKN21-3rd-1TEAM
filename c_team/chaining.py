@@ -20,9 +20,10 @@ def get_chain():
     llm = ChatOpenAI(model_name="gpt-5", api_key=os.getenv("OPENAI_API_KEY"))
     prompt = ChatPromptTemplate.from_template(
         """
-            당신은 **형사법** 법령 검색 도움 봇입니다. 제공된 {context}를 바탕으로 사용자의 {question}에 답변해 주세
-            요.
-            
+            당신은 **형사법** 법령 검색 도움 봇입니다. 
+            제공된 {context}를 바탕으로 사용자의 {question}에 답변해 주세요.
+            Question이 **형사법**에 해당하지 않는 법령에 대한 질문이라면 관련 법령을 검색할 수 없다고 답변하고 전문가의 도움을 받기를 제안하세요.
+
             **Required Rule**
                 1. 반드시 답변의 근거가 된 참고자료({context})를 포함해야 합니다.
                 2. {context}가 없을 경우 관련 법령을 검색할 수 없다고 답변하고 전문가의 도움을 받기를 제안하세요.

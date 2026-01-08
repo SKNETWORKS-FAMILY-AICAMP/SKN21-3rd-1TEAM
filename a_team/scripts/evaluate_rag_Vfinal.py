@@ -6,13 +6,13 @@ Ragas 메트릭(Faithfulness, Answer Relevancy, Context Precision/Recall)을 계
 
 Usage:
     # 기본 실행
-    uv run a_team/scripts/evaluate_rag_V1.py
+    uv run a_team/scripts/evaluate_rag_Vfinal.py
 
     # 샘플 수 지정 (테스트용)
-    uv run a_team/scripts/evaluate_rag_V1.py --sample 10
+    uv run a_team/scripts/evaluate_rag_Vfinal.py --sample 10
 
     # 커스텀 골든셋 경로
-    uv run a_team/scripts/evaluate_rag_V1.py --golden-set path/to/golden_set.json
+    uv run a_team/scripts/evaluate_rag_Vfinal.py --golden-set a_team/data/evaluation/golden_set_quota_20.json
 """
 
 import os
@@ -29,7 +29,6 @@ from tqdm import tqdm
 
 # Ragas 평가 메트릭
 from ragas import evaluate
-from ragas.run_config import RunConfig
 from ragas.metrics import (
     Faithfulness,
     ResponseRelevancy,
@@ -129,11 +128,24 @@ def run_inference(questions: List[str], chatbot_version: str = "v3", verbose: bo
     print(f"\n🤖 LangGraph 모델 초기화 중... (버전: {chatbot_version})")
 
     if chatbot_version.lower() == "v1":
-        from a_team.scripts.chatbot_graph_V1 import initialize_langgraph_chatbot
+        from chatbot_graph_V1 import initialize_langgraph_chatbot
     elif chatbot_version.lower() == "v2":
-        from a_team.scripts.chatbot_graph_V2 import initialize_langgraph_chatbot
+        from chatbot_graph_V2 import initialize_langgraph_chatbot
     elif chatbot_version.lower() == "v3":
-        from a_team.scripts.chatbot_graph_V3 import initialize_langgraph_chatbot
+        from chatbot_graph_V3 import initialize_langgraph_chatbot
+    elif chatbot_version.lower() == "v4":
+        from chatbot_graph_V4 import initialize_langgraph_chatbot
+    elif chatbot_version.lower() == "v5":
+        from chatbot_graph_V5 import initialize_langgraph_chatbot
+    elif chatbot_version.lower() == "v6":
+        from chatbot_graph_V6 import initialize_langgraph_chatbot
+    elif chatbot_version.lower() == "v7":
+        from chatbot_graph_V7 import initialize_langgraph_chatbot
+    elif chatbot_version.lower() == "v8":
+        # V8는 architectures 폴더에 있음 - initialize_rag_chatbot 사용
+        from architectures.chatbot_graph_V8 import initialize_rag_chatbot as initialize_langgraph_chatbot
+    elif chatbot_version.lower() == "v9":
+        from architectures.chatbot_graph_V9 import initialize_rag_chatbot as initialize_langgraph_chatbot
     else:
         raise ValueError(f"지원하지 않는 챗봇 버전입니다: {chatbot_version}")
 
@@ -237,10 +249,7 @@ def evaluate_with_ragas(
     contexts: List[List[str]],
     references: List[str],
     llm_model: str = "gpt-4o",
-    embedding_model: Any = None,
-    max_workers: int = 2,
-    timeout: int = 90,
-    max_retries: int = 2
+    embedding_model: Any = None
 ) -> Dict[str, Any]:
     """
     Ragas 메트릭으로 RAG 성능을 평가합니다.
@@ -266,9 +275,7 @@ def evaluate_with_ragas(
     })
 
     # 평가용 LLM 및 Embeddings 설정
-    eval_llm = LangchainLLMWrapper(
-        ChatOpenAI(model=llm_model, temperature=0, timeout=timeout, max_retries=max_retries)
-    )
+    eval_llm = LangchainLLMWrapper(ChatOpenAI(model=llm_model, temperature=0))
     eval_embeddings = LangchainEmbeddingsWrapper(
         embedding_model) if embedding_model else None
 
@@ -287,8 +294,7 @@ def evaluate_with_ragas(
             metrics=metrics,
             llm=eval_llm,
             embeddings=eval_embeddings,
-            raise_exceptions=False,
-            run_config=RunConfig(max_workers=max_workers, timeout=timeout, max_retries=max_retries, max_wait=30)
+            raise_exceptions=False
         )
 
         print("✅ Ragas 평가 완료")
@@ -396,7 +402,7 @@ def main():
     parser.add_argument(
         '--golden-set',
         type=str,
-        default='a_team/data/evaluation/labor_law_golden_set.json',
+        default='a_team/data/evaluation/golden_set_quota_10.json',
         help='Golden Dataset JSON 경로'
     )
     parser.add_argument(
@@ -418,24 +424,6 @@ def main():
         help='Ragas 평가에 사용할 LLM 모델'
     )
     parser.add_argument(
-        '--max-workers',
-        type=int,
-        default=2,
-        help='Ragas 평가 시 동시 LLM 호출 개수 (TPM 제한 회피용, 기본 2)'
-    )
-    parser.add_argument(
-        '--llm-timeout',
-        type=int,
-        default=90,
-        help='Ragas 평가 LLM 타임아웃 초 (기본 90s)'
-    )
-    parser.add_argument(
-        '--llm-retries',
-        type=int,
-        default=2,
-        help='Ragas 평가 LLM 재시도 횟수 (기본 2)'
-    )
-    parser.add_argument(
         '--dry-run',
         action='store_true',
         help='데이터 로드만 테스트하고 종료'
@@ -444,8 +432,8 @@ def main():
         '--chatbot-version',
         type=str,
         default='v3',
-        choices=['v1', 'v2', 'v3'],
-        help='평가할 챗봇 버전 (v1, v2, v3)'
+        choices=['v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v7', 'v8', 'v9'],
+        help='평가할 챗봇 버전 (v1, v2, v3, v4, v5, v6, v7, v8, v9)'
     )
     args = parser.parse_args()
 
@@ -503,10 +491,7 @@ def main():
         contexts=contexts,
         references=references,
         llm_model=args.eval_model,
-        embedding_model=embeddings,
-        max_workers=args.max_workers,
-        timeout=args.llm_timeout,
-        max_retries=args.llm_retries
+        embedding_model=embeddings
     )
     # 4. 결과 저장 (출력 전에 먼저 저장!)
     if args.output:
