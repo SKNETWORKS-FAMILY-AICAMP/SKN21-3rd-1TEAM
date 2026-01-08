@@ -128,11 +128,19 @@ def run_inference(questions: List[str], chatbot_version: str = "v3", verbose: bo
     print(f"\n🤖 LangGraph 모델 초기화 중... (버전: {chatbot_version})")
 
     if chatbot_version.lower() == "v1":
-        from a_team.scripts.chatbot_graph_V1 import initialize_langgraph_chatbot
+        from chatbot_graph_V1 import initialize_langgraph_chatbot
     elif chatbot_version.lower() == "v2":
-        from a_team.scripts.chatbot_graph_V2 import initialize_langgraph_chatbot
+        from chatbot_graph_V2 import initialize_langgraph_chatbot
     elif chatbot_version.lower() == "v3":
-        from a_team.scripts.chatbot_graph_V3 import initialize_langgraph_chatbot
+        from chatbot_graph_V3 import initialize_langgraph_chatbot
+    elif chatbot_version.lower() == "v4":
+        from chatbot_graph_V4 import initialize_langgraph_chatbot
+    elif chatbot_version.lower() == "v5":
+        from chatbot_graph_V5 import initialize_langgraph_chatbot
+    elif chatbot_version.lower() == "v6":
+        from chatbot_graph_V6 import initialize_langgraph_chatbot
+    elif chatbot_version.lower() == "v7":
+        from chatbot_graph_V7 import initialize_langgraph_chatbot
     else:
         raise ValueError(f"지원하지 않는 챗봇 버전입니다: {chatbot_version}")
 
@@ -389,7 +397,7 @@ def main():
     parser.add_argument(
         '--golden-set',
         type=str,
-        default='a_team/data/evaluation/labor_law_golden_set.json',
+        default='a_team/data/evaluation/golden_set_quota_10.json',
         help='Golden Dataset JSON 경로'
     )
     parser.add_argument(
@@ -419,8 +427,8 @@ def main():
         '--chatbot-version',
         type=str,
         default='v3',
-        choices=['v1', 'v2', 'v3'],
-        help='평가할 챗봇 버전 (v1, v2, v3)'
+        choices=['v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v7'],
+        help='평가할 챗봇 버전 (v1, v2, v3, v4, v5, v6, v7, v8)'
     )
     args = parser.parse_args()
 

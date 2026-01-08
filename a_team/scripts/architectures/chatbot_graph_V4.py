@@ -1,6 +1,11 @@
 ################################################
 # A-TEAM 법률 RAG 챗봇 (LangGraph V4)
-# V3에서 Hybrid Retriever 적용 (Vector + BM25)
+# V3에서 Hybrid Retriever 적용 (Vector + BM25) + query expansion
+# reranker top-k 5 -> 7
+# 핵심 키워드 추출 (3-5개)
+# 법률 용어 매핑 (일상어 → 법률 용어)
+# 관련 조항 추론 (예: 주휴수당 → 근로기준법 제55조)
+# 동의어 확장
 # 작성자 정보
 # 작성자: SKN 3-1팀 A-TEAM
 # 작성일: 2026-01-08

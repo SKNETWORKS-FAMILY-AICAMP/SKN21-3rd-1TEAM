@@ -301,7 +301,7 @@ def main():
     parser.add_argument(
         '--golden-set',
         type=str,
-        default='a_team/data/evaluation/labor_law_golden_set.json',
+        default='a_team/data/evaluation/golden_set_quota_10.json',
         help='Golden Dataset JSON 경로'
     )
     parser.add_argument(
@@ -319,7 +319,7 @@ def main():
     parser.add_argument(
         '--eval-model',
         type=str,
-        default='gpt-4o',
+        default='gpt-4o-mini',
         help='Ragas 평가에 사용할 LLM 모델'
     )
     parser.add_argument(
