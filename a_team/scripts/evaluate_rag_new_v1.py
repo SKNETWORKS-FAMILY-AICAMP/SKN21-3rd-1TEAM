@@ -142,9 +142,10 @@ def run_inference(questions: List[str], chatbot_version: str = "v3", verbose: bo
     elif chatbot_version.lower() == "v7":
         from chatbot_graph_V7 import initialize_langgraph_chatbot
     elif chatbot_version.lower() == "v8":
-        from chatbot_graph_V8 import initialize_langgraph_chatbot
+        # V8는 architectures 폴더에 있음 - initialize_rag_chatbot 사용
+        from architectures.chatbot_graph_V8 import initialize_rag_chatbot as initialize_langgraph_chatbot
     elif chatbot_version.lower() == "v9":
-        from chatbot_graph_V9 import initialize_langgraph_chatbot
+        from architectures.chatbot_graph_V9 import initialize_rag_chatbot as initialize_langgraph_chatbot
     else:
         raise ValueError(f"지원하지 않는 챗봇 버전입니다: {chatbot_version}")
 

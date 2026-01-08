@@ -84,19 +84,24 @@ class Config:
     # [4] PROMPTS - 노드별 시스템 프롬프트
     # ═══════════════════════════════════════════════════════════
 
-    # --- [노드: Query Expansion] 쿼리 확장용 프롬프트 ---
-    PROMPT_QUERY_EXPANSION: str = """당신은 한국 법률 검색 전문가입니다.
-사용자의 법률 질문을 분석하여 벡터 검색과 키워드 검색에 최적화된 쿼리로 확장합니다.
+    # --- [노드: Query Expansion] HyDE + Hybrid Search 용 프롬프트 ---
+    PROMPT_QUERY_EXPANSION: str = """당신은 법률 검색 쿼리 생성 전문가입니다.
 
-## 확장 전략
-1. 핵심 키워드 추출: 질문에서 가장 중요한 법률 개념 3-5개 추출
-2. 법률 용어 매핑: 일상 표현을 법률 용어로 변환
-3. 관련 조항 추론: 해당 분야의 대표 법령명과 조항 추정
-4. 동의어 확장: 검색 범위를 넓히기 위한 유사 표현 추가
+## 임무
+사용자의 모호한 질문을 검색 엔진(BM25 및 Vector DB)이 이해하기 쉬운 형태로 변환하세요.
+
+## 전략
+1. **키워드 추출 (BM25용)**: 조사 등을 제거한 핵심 법률 명사만 추출하세요.
+   - 예: "퇴직금 못 받았어요" → "근로기준법 퇴직금 지급 청구"
+2. **의미 쿼리 (Vector용)**: 질문의 의도와 문맥을 포함한 자연어 문장을 작성하세요.
+   - 예: "퇴직금 지급 기한과 청구 방법에 대한 근로기준법 규정"
+3. **HyDE(가상 문서)**: 질문에 대한 예상 답변을 2문장으로 작성하세요. (사실 여부보다 법률 용어와 문맥이 중요)
+   - 예: "근로기준법 제36조에 따르면 퇴직금은 퇴직 후 14일 이내에 지급해야 합니다..."
 
 ## 출력 규칙
-- expanded_query는 원본 질문 + 핵심 키워드 + 관련 법령명을 자연스럽게 조합
-- 최대 100자 이내로 압축"""
+- keyword_query: BM25 검색용 (조사 제거, 핵심 명사만, 50자 이내)
+- semantic_query: Vector 검색용 (의도 포함 자연어, 100자 이내)  
+- hyde_passage: Vector 검색용 가상 문서 (2문장, 법령명/조항 포함)"""
 
     # --- [노드: Analyze] 질문 분석용 프롬프트 ---
     PROMPT_ANALYZE: str = """당신은 법률 질문을 심층 분석하는 전문가입니다.
@@ -250,13 +255,14 @@ class JinaReranker(BaseDocumentCompressor):
 # ============================================================
 # [SECTION 5] Pydantic Schemas - LLM 구조화된 출력용
 # ============================================================
-class ExpandedQuery(BaseModel):
-    """검색 쿼리 확장 결과"""
-    original_query: str = Field(description="원본 사용자 질문")
-    search_keywords: List[str] = Field(description="핵심 검색 키워드 (3-5개)")
-    legal_terms: List[str] = Field(description="관련 법률 용어 및 조항명")
-    synonyms: List[str] = Field(description="동의어 및 유사 표현 (2-3개)")
-    expanded_query: str = Field(description="확장된 검색 쿼리")
+class HybridQuery(BaseModel):
+    """HyDE + Hybrid Search를 위한 쿼리 확장 결과"""
+    keyword_query: str = Field(
+        description="BM25 검색용: 조사 제거된 핵심 법률 키워드 (예: '근로기준법 해고예고수당 부당해고')")
+    semantic_query: str = Field(
+        description="Vector 검색용: 질문 의도와 문맥을 포함한 자연어 문장")
+    hyde_passage: str = Field(
+        description="Vector 검색용 가상 문서: 예상되는 법조문 내용 (2-3문장)")
 
 
 class QueryAnalysis(BaseModel):
@@ -446,22 +452,28 @@ class LegalRAGBuilder:
         )
 
     def _create_query_expander(self):
-        """Query Expander 생성 [사용 프롬프트: PROMPT_QUERY_EXPANSION]"""
-        structured_llm = self.llm.with_structured_output(ExpandedQuery)
+        """Query Expander 생성 [사용 프롬프트: PROMPT_QUERY_EXPANSION] - HyDE + Hybrid"""
+        structured_llm = self.llm.with_structured_output(HybridQuery)
 
         expansion_prompt = ChatPromptTemplate.from_messages([
             ("system", self.config.PROMPT_QUERY_EXPANSION),
             ("human", "{query}")
         ])
 
-        def expand_query(query: str) -> ExpandedQuery:
+        def expand_query(query: str) -> HybridQuery:
             try:
                 chain = expansion_prompt | structured_llm
-                return chain.invoke({"query": query})
-            except Exception:
-                return ExpandedQuery(
-                    original_query=query, search_keywords=[],
-                    legal_terms=[], synonyms=[], expanded_query=query
+                result = chain.invoke({"query": query})
+                logger.info(
+                    f"HyDE Query Generated - BM25: {result.keyword_query[:40]}...")
+                return result
+            except Exception as e:
+                logger.warning(f"Query expansion failed: {e}")
+                # Fallback: 원본 쿼리 사용
+                return HybridQuery(
+                    keyword_query=query,
+                    semantic_query=query,
+                    hyde_passage=query
                 )
 
         return expand_query
@@ -518,39 +530,47 @@ class LegalRAGBuilder:
             analysis = state.get("query_analysis", {})
             related_laws = analysis.get("related_laws", [])
 
-            # Query Expansion
+            # [HyDE + Hybrid] Query Expansion
+            keyword_query = original_query
+            vector_query = original_query
+
             if query_expander:
                 try:
-                    expanded = query_expander(original_query)
-                    search_query = expanded.expanded_query
-                    logger.info(f"Expanded query: {search_query[:60]}...")
-                except Exception:
-                    search_query = original_query
-            else:
-                search_query = original_query
+                    hybrid = query_expander(original_query)
+                    keyword_query = hybrid.keyword_query  # BM25용
+                    # Vector용: HyDE passage 우선, 없으면 semantic_query
+                    vector_query = hybrid.hyde_passage if hybrid.hyde_passage else hybrid.semantic_query
+
+                    logger.info(f"[HyDE] BM25 query: {keyword_query[:50]}...")
+                    logger.info(f"[HyDE] Vector query: {vector_query[:50]}...")
+                except Exception as e:
+                    logger.warning(
+                        f"Query expansion failed, using original: {e}")
 
             all_docs = []
 
-            # 1. Vector Search
+            # 1. Vector Search - HyDE passage 사용
             try:
                 vector_results = vectorstore.similarity_search_with_score(
-                    search_query, k=config.TOP_K_VECTOR)
+                    vector_query, k=config.TOP_K_VECTOR)  # <-- hyde_passage 또는 semantic_query
                 vector_docs = [doc for doc, _ in vector_results]
                 for doc in vector_docs:
                     doc.metadata["search_source"] = "vector"
                 all_docs.extend(vector_docs)
-                logger.info(f"Vector search: {len(vector_docs)} docs")
+                logger.info(f"Vector search (HyDE): {len(vector_docs)} docs")
             except Exception as e:
                 logger.error(f"Vector search error: {e}")
 
-            # 2. BM25 Search
+            # 2. BM25 Search - keyword_query 사용
             if bm25_retriever:
                 try:
-                    bm25_docs = bm25_retriever.invoke(search_query)
+                    bm25_docs = bm25_retriever.invoke(
+                        keyword_query)  # <-- keyword_query
                     for doc in bm25_docs:
                         doc.metadata["search_source"] = "bm25"
                     all_docs.extend(bm25_docs)
-                    logger.info(f"BM25 search: {len(bm25_docs)} docs")
+                    logger.info(
+                        f"BM25 search (keyword): {len(bm25_docs)} docs")
                 except Exception as e:
                     logger.error(f"BM25 search error: {e}")
 
