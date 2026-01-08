@@ -63,7 +63,7 @@ class AgentState(TypedDict):
 # ===========================
 class JinaReranker(BaseDocumentCompressor):
     model_name: str = "jinaai/jina-reranker-v2-base-multilingual"
-    top_n: int = 5
+    top_n: int = 7
     model: Any = None
     tokenizer: Any = None
 
@@ -118,6 +118,66 @@ class JinaReranker(BaseDocumentCompressor):
 # ===========================
 # 노드 함수 정의 (LangGraph 영역)
 # ===========================
+
+# Pydantic 모델: Query Expansion 결과
+class ExpandedQuery(BaseModel):
+    """검색 쿼리 확장 결과"""
+    original_query: str = Field(description="원본 사용자 질문")
+    search_keywords: List[str] = Field(description="핵심 검색 키워드 (3-5개)")
+    legal_terms: List[str] = Field(
+        description="관련 법률 용어 및 조항명 (예: 근로기준법 제23조)")
+    synonyms: List[str] = Field(description="동의어 및 유사 표현 (2-3개)")
+    expanded_query: str = Field(description="확장된 검색 쿼리 (원본 + 키워드 조합)")
+
+
+def create_query_expander(llm: ChatOpenAI):
+    """Query Expansion 함수 생성 - 법률 도메인 특화"""
+
+    structured_llm = llm.with_structured_output(ExpandedQuery)
+
+    expansion_prompt = ChatPromptTemplate.from_messages([
+        ("system", """당신은 한국 법률 검색 전문가입니다. 
+사용자의 법률 질문을 분석하여 벡터 검색과 키워드 검색에 최적화된 쿼리로 확장합니다.
+
+## 목표
+법률 데이터베이스에서 관련 문서를 최대한 많이 검색할 수 있도록 쿼리를 확장합니다.
+
+## 확장 전략
+1. **핵심 키워드 추출**: 질문에서 가장 중요한 법률 개념 3-5개 추출
+2. **법률 용어 매핑**: 일상 표현을 법률 용어로 변환 (예: "월급" → "임금", "잘림" → "해고")
+3. **관련 조항 추론**: 해당 분야의 대표 법령명과 조항 추정 (예: "주휴수당" → "근로기준법 제55조")
+4. **동의어 확장**: 검색 범위를 넓히기 위한 유사 표현 추가
+
+## 법률 분야별 주요 키워드
+- 노동법: 근로기준법, 임금, 퇴직금, 해고, 산재, 주휴수당, 연차, 근로계약
+- 형사법: 형법, 형사소송법, 고소, 고발, 기소, 구속, 공소시효
+- 민사법: 민법, 계약, 손해배상, 소유권, 채권, 물권, 불법행위
+
+## 출력 규칙
+- expanded_query는 원본 질문 + 핵심 키워드 + 관련 법령명을 자연스럽게 조합
+- 검색에 불필요한 조사, 어미는 제거
+- 최대 100자 이내로 압축"""),
+        ("human", "{query}")
+    ])
+
+    def expand_query(query: str) -> ExpandedQuery:
+        """질문을 검색에 최적화된 형태로 확장"""
+        try:
+            chain = expansion_prompt | structured_llm
+            result: ExpandedQuery = chain.invoke({"query": query})
+            return result
+        except Exception as e:
+            # 실패 시 원본 쿼리 그대로 반환
+            return ExpandedQuery(
+                original_query=query,
+                search_keywords=[],
+                legal_terms=[],
+                synonyms=[],
+                expanded_query=query
+            )
+
+    return expand_query
+
 
 # Pydantic 모델: 질문 분석 결과
 class QueryAnalysis(BaseModel):
@@ -208,27 +268,43 @@ def create_clarify_node(llm: ChatOpenAI):
     return request_clarification
 
 
-def create_search_node(vectorstore: QdrantVectorStore, bm25_retriever: Optional[BM25Retriever] = None):
-    """노드 3: 하이브리드 검색 (Vector + BM25)"""
+def create_search_node(vectorstore: QdrantVectorStore,
+                       bm25_retriever: Optional[BM25Retriever] = None,
+                       query_expander=None):
+    """노드 3: 하이브리드 검색 (Vector + BM25) + Query Expansion"""
 
     # Reranker를 한 번만 생성 (성능 최적화)
     _reranker = JinaReranker(top_n=5)
 
     def search_documents(state: AgentState) -> AgentState:
-        """검색 실행 노드: 하이브리드 검색 (Vector + BM25) 후 리랭킹"""
-        query = state["user_query"]
-        analysis = state.get("query_analysis", {})
-        category = analysis.get("category", "기타")
+        """검색 실행 노드: Query Expansion → 하이브리드 검색 → 리랭킹"""
+        original_query = state["user_query"]
 
-        print(f"🔍 [하이브리드 검색] 쿼리: {query[:50]}...")
+        # Query Expansion 적용
+        if query_expander is not None:
+            print(f"🔍 [Query Expansion] 쿼리 확장 중...")
+            try:
+                expanded = query_expander(original_query)
+                search_query = expanded.expanded_query
+                print(f"   📝 원본: {original_query[:40]}...")
+                print(f"   🔄 확장: {search_query[:60]}...")
+                if expanded.legal_terms:
+                    print(f"   📋 법률 용어: {', '.join(expanded.legal_terms[:3])}")
+            except Exception as e:
+                print(f"   ⚠️  Query Expansion 실패: {e}")
+                search_query = original_query
+        else:
+            search_query = original_query
+
+        print(f"🔍 [하이브리드 검색] 쿼리: {search_query[:50]}...")
 
         all_docs = []
 
-        # 1. Vector Search (유사도 기반)
+        # 1. Vector Search (유사도 기반) - 확장된 쿼리 사용
         print(f"   📊 [Vector Search] 실행 중...")
         try:
             vector_results = vectorstore.similarity_search_with_score(
-                query, k=15)
+                search_query, k=15)
             vector_docs = [doc for doc, score in vector_results]
             print(f"   ✅ Vector Search: {len(vector_docs)}개 문서 검색")
 
@@ -239,11 +315,11 @@ def create_search_node(vectorstore: QdrantVectorStore, bm25_retriever: Optional[
         except Exception as e:
             print(f"   ⚠️  Vector Search 오류: {e}")
 
-        # 2. BM25 Search (키워드 기반)
+        # 2. BM25 Search (키워드 기반) - 확장된 쿼리 사용
         if bm25_retriever is not None:
             print(f"   📝 [BM25 Search] 실행 중...")
             try:
-                bm25_docs = bm25_retriever.invoke(query)
+                bm25_docs = bm25_retriever.invoke(search_query)
                 print(f"   ✅ BM25 Search: {len(bm25_docs)}개 문서 검색")
 
                 # BM25 검색 결과에 source 표시
@@ -267,11 +343,11 @@ def create_search_node(vectorstore: QdrantVectorStore, bm25_retriever: Optional[
         print(f"   🔄 중복 제거 후: {len(unique_docs)}개 문서")
 
         if unique_docs:
-            # 4. 리랭킹 (Jina Reranker)
+            # 4. 리랭킹 (Jina Reranker) - 원본 쿼리로 리랭킹 (의미 보존)
             print(f"🔄 [리랭킹] Jina Reranker로 상위 5개 문서 선별 중...")
             try:
                 reranked_docs = _reranker.compress_documents(
-                    unique_docs, query)
+                    unique_docs, original_query)
 
                 if reranked_docs:
                     print(f"✅ [리랭킹 완료] {len(reranked_docs)}개 문서 선별")
@@ -306,8 +382,6 @@ def create_case_law_search_node(llm: ChatOpenAI):
     def search_case_law(state: AgentState) -> AgentState:
         """대법원 판례 검색 노드: Tavily를 통해 관련 판례 웹 검색"""
         query = state["user_query"]
-        analysis = state.get("query_analysis", {})
-        category = analysis.get("category", "기타")
 
         print(f"⚖️  [판례 검색] 대법원 판례 웹 검색 중...")
 
@@ -326,8 +400,8 @@ def create_case_law_search_node(llm: ChatOpenAI):
                 include_raw_content=False
             )
 
-            # 판례 검색 쿼리 최적화
-            search_query = f"대법원 판례 {category} {query}"
+            # 판례 검색 쿼리
+            search_query = f"대법원 판례 {query}"
 
             # 검색 실행
             results = search_tool.invoke({"query": search_query})
@@ -372,9 +446,7 @@ def create_generate_node(llm: ChatOpenAI):
 5. 확실하지 않은 내용은 "~로 해석될 수 있습니다" 등으로 신중하게 표현하세요.
 6. 전문 법률 상담이 필요한 경우 안내하세요.
 7. 한국어로 답변하세요."""),
-        ("human", """질문 분야: {category}
-
-사용자 질문: {query}
+        ("human", """사용자 질문: {query}
 
 📚 검색된 법령/문서:
 {context}
@@ -388,8 +460,6 @@ def create_generate_node(llm: ChatOpenAI):
     def generate_answer(state: AgentState) -> AgentState:
         """답변 생성 노드: 검색 결과와 판례를 종합하여 답변 생성"""
         query = state["user_query"]
-        analysis = state.get("query_analysis", {})
-        category = analysis.get("category", "기타")
         docs = state.get("retrieved_docs", [])
         case_laws = state.get("case_law_results", [])
 
@@ -443,7 +513,6 @@ def create_generate_node(llm: ChatOpenAI):
             # LLM으로 답변 생성
             chain = answer_prompt | llm
             response = chain.invoke({
-                "category": category,
                 "query": query,
                 "context": context,
                 "case_law": case_law_context
@@ -583,7 +652,7 @@ def initialize_resources():
 # LangGraph 초기화
 # ===========================
 def initialize_langgraph_chatbot():
-    """LangGraph 기반 RAG 챗봇 초기화 (조건부 분기 포함, 하이브리드 검색)"""
+    """LangGraph 기반 RAG 챗봇 초기화 (조건부 분기 포함, 하이브리드 검색 + Query Expansion)"""
 
     # 사전 준비: 리소스 초기화
     resources = initialize_resources()
@@ -599,15 +668,21 @@ def initialize_langgraph_chatbot():
     )
     print("✅ LLM 설정 완료")
 
+    # Query Expander 생성
+    print(f"\n🔄 Query Expander 초기화 중...")
+    query_expander = create_query_expander(llm)
+    print("✅ Query Expander 초기화 완료")
+
     # 노드 생성
     print(f"\n⚙️  LangGraph 노드 생성 중...")
     analyze_node = create_analyze_query_node(llm)
     clarify_node = create_clarify_node(llm)
-    # 하이브리드 검색 노드 (Vector + BM25)
-    search_node = create_search_node(vectorstore, bm25_retriever)
+    # 하이브리드 검색 노드 (Vector + BM25 + Query Expansion)
+    search_node = create_search_node(
+        vectorstore, bm25_retriever, query_expander)
     case_law_node = create_case_law_search_node(llm)
     generate_node = create_generate_node(llm)
-    print("✅ 노드 생성 완료 (5개, 하이브리드 검색 포함)")
+    print("✅ 노드 생성 완료 (5개, 하이브리드 검색 + Query Expansion)")
 
     # StateGraph 구성
     print(f"\n🔗 LangGraph 워크플로우 구성 중...")
