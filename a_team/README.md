@@ -1,6 +1,6 @@
 # A-TEAM Chatbot & Data Processing
 
-본 문서는 A-TEAM의 법률 RAG 챗봇 아키텍처와 데이터 전처리 로직에 대해 기술합니다.
+본 문서는 A-TEAM의 노동 법률 RAG 챗봇 아키텍처와 데이터 전처리 로직에 대해 기술합니다.
 
 ## 1. 시스템 아키텍처 (System Architecture)
 
@@ -98,3 +98,37 @@ graph TD
 
 - **난관**: HyDE, Query Expansion, Hybrid Search, Reranking 등 다양한 SOTA 기법들을 적용했음에도 불구하고, "어떻게 하면 정확한 문서를 **100%** 찾아올 것인가"에 대한 명쾌한 해결책(Silver Bullet)을 찾지 못했습니다.
 - **결론**: 법률 도메인에서는 단순 검색을 넘어, 질문의 의도를 파악해 '관련 법령'을 먼저 특정하고 필터링하는 **Metadata Filtering** 전략이 필수적임을 깨달았습니다.
+
+## 4. 디렉토리 구조
+### 4.1. 트리 구조
+<img src="SKN21-3rd-1Team-A_directory.png" width="60%" alt="A-Team Directory Structure">
+
+### 4.2. 디렉토리별 설명
+#### 📁 data/
+- **raw/**: 크롤링한 원본 JSON 및 PDF 파일
+  - 법령 데이터 (노동법, 민사법, 형사법)
+  - 법령외 데이터 (결정선례, QA, 판정사례, 행정해석)
+- **processed/**: 청킹 및 전처리된 데이터
+  - 벡터 DB 저장을 위해 가공된 데이터
+- **evaluation/**: 평가 관련 데이터
+  - Golden dataset (V1, V2_10, V2_20)
+  - 평가 결과 (baseline, V1~V8)
+
+#### 📁 scripts/
+- **architectures/**: 챗봇 구현 버전들
+  - [chatbot_baseline.py](scripts/architectures/chatbot_baseline.py): 기본 구현
+  - [chatbot_chain_V2.py](scripts/architectures/chatbot_chain_V2.py) ~ [chatbot_chain_V3.py](scripts/architectures/chatbot_chain_V3.py): LangChain 기반
+  - [chatbot_graph_V8_FINAL.py](scripts/architectures/chatbot_graph_V8_FINAL.py): LangGraph 기반 최신 버전 ⭐
+- **crawlers/**: 데이터 수집(크롤링) 스크립트
+- **data_preprocessing/**: 데이터 전처리
+  - [preprocesser_법령.py](scripts/data_preprocessing/preprocesser_법령.py), [preprocesser_법령외.py](scripts/data_preprocessing/preprocesser_법령외.py): 전처리 스크립트
+  - [vectorizer_법령.py](scripts/data_preprocessing/vectorizer_법령.py), [vectorizer_법령외.py](scripts/data_preprocessing/vectorizer_법령외.py): 벡터화 스크립트
+- **평가 및 생성 스크립트**:
+  - [evaluate_rag_baseline.py](scripts/evaluate_rag_baseline.py) ~ [evaluate_rag_Vfinal.py](scripts/evaluate_rag_Vfinal.py): RAG 평가
+  - [generate_evaldata_V2.py](scripts/generate_evaldata_V2.py): 평가 데이터셋 생성
+
+#### 통계
+- 총 파일 수: 약 60개
+- 총 데이터 크기: ~200 MB (raw + processed)
+- 챗봇 버전: 12개 (baseline + chain 2개 + graph 8개)
+- 평가 결과: 14개
