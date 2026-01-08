@@ -298,7 +298,8 @@ def evaluate_with_ragas(
 def save_results(
     df: pd.DataFrame,
     ragas_result: Dict,
-    output_path: str
+    output_path: str,
+    chatbot_version: str = "V1"
 ):
     """
     평가 결과를 JSON 파일로 저장합니다.
@@ -325,9 +326,10 @@ def save_results(
     )
 
     # 요약 정보 생성 (평균 점수)
+    # 요약 정보 생성 (평균 점수)
     summary = {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "model_version": "LangGraph V1",
+        "model_version": f"LangGraph {chatbot_version.upper()}",
         "metrics": {}
     }
 
@@ -487,7 +489,8 @@ def main():
         output_path = output_dir / f"evaluation_results_V1_{timestamp}.json"
 
     try:
-        save_results(df, ragas_result, str(output_path))
+        save_results(df, ragas_result, str(output_path),
+                     chatbot_version=args.chatbot_version)
     except Exception as e:
         print(f"⚠️ 결과 저장 중 오류 발생: {e}")
 
