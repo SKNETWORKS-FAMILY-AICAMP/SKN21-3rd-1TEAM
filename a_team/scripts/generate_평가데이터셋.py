@@ -4,26 +4,29 @@ Qdrant Cloud의 데이터를 기반으로 RAG 챗봇 평가를 위한 Golden Set
 요구사항(커스텀):
 1) 총 20개
 2) 노동법 10, 민사법 5, 형사법 5
-3) 각 분야별 난이도 비율 고급:중급:초급 = 2:1:1 (정수화는 반올림 후 보정)
-4) 노동법 질문은 법령 외 문서도 참고하여 답변할 수 있도록 질문 생성(가능하면 해당 플래그 true인 질문을 우선 선택)
+3) 노동법 질문은 법령 외 문서도 참고하여 답변할 수 있도록 질문 생성(가능하면 해당 플래그 true인 질문을 우선 선택)
 
 구현 방식:
 - RAGAS로 분야별로 충분히 큰 풀을 생성
-- LLM으로 (분야/난이도/노동-비법령참고가능) 라벨링
-- 쿼터에 맞춰 샘플링
+- LLM으로 (분야/노동-비법령참고가능) 라벨링
+- 분야별 목표 개수에 맞춰 샘플링
 """
 
+import argparse
 import os
-import re
+import random
 import warnings
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-from ragas.testset import TestsetGenerator
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-
 import pandas as pd
 from dotenv import load_dotenv
+from langchain_core.documents import Document
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from qdrant_client import QdrantClient
+from ragas.run_config import RunConfig
+from ragas.testset import TestsetGenerator
 
 # .env 파일에서 환경변수 로드
 load_dotenv()
@@ -33,38 +36,6 @@ os.environ["LANGCHAIN_TRACING_V2"] = "false"
 os.environ["LANGCHAIN_TRACING"] = "false"
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
-
-
-# -----------------------------
-# 유틸: 쿼터 계산 (2:1:1 비율)
-# -----------------------------
-def compute_difficulty_quota(n: int) -> Dict[str, int]:
-    """
-    고급:중급:초급 = 2:1:1 비율을 n개에 맞게 정수로 할당.
-    - round 후 총합 보정 방식.
-    반환 키: {"고급": x, "중급": y, "초급": z}
-    """
-    ratio = {"고급": 2, "중급": 1, "초급": 1}
-    total = sum(ratio.values())
-    raw = {k: n * v / total for k, v in ratio.items()}
-    q = {k: int(round(val)) for k, val in raw.items()}
-
-    # 총합 보정
-    diff = n - sum(q.values())
-    # diff>0이면 가장 큰 비율(고급)부터 +, diff<0이면 가장 큰 것부터 -
-    order = ["고급", "중급", "초급"]
-    i = 0
-    while diff != 0:
-        k = order[i % len(order)]
-        if diff > 0:
-            q[k] += 1
-            diff -= 1
-        else:
-            if q[k] > 0:
-                q[k] -= 1
-                diff += 1
-        i += 1
-    return q
 
 
 def normalize_domain_label(s: str) -> str:
@@ -78,57 +49,112 @@ def normalize_domain_label(s: str) -> str:
     return "기타"
 
 
-def normalize_level_label(s: str) -> str:
-    s = (s or "").strip()
-    if "고급" in s:
-        return "고급"
-    if "중급" in s:
-        return "중급"
-    if "초급" in s:
-        return "초급"
-    return "중급"
-
-
-def parse_label_line(line: str) -> Tuple[str, str, bool]:
+def parse_label_line(line: str) -> Tuple[str, bool]:
     """
-    기대 형식: "분야|난이도|노동-비법령참고가능(yes/no)"
-    예: "노동법|고급|yes"
+    기대 형식: "분야|노동-비법령참고가능(yes/no)"
+    예: "노동법|yes"
     """
     parts = [p.strip() for p in (line or "").split("|")]
-    if len(parts) < 3:
-        return ("기타", "중급", False)
+    if len(parts) < 2:
+        return ("기타", False)
     domain = normalize_domain_label(parts[0])
-    level = normalize_level_label(parts[1])
-    ns = parts[2].lower()
+    ns = parts[1].lower()
     non_statute_ok = ns in ("yes", "y", "true", "1", "가능")
-    return (domain, level, non_statute_ok)
+    return (domain, non_statute_ok)
 
 
 def build_labeler_llm(model_name: str) -> ChatOpenAI:
     return ChatOpenAI(model=model_name, temperature=0)
 
 
+def reformat_answers(df: pd.DataFrame, llm: ChatOpenAI) -> pd.DataFrame:
+    """
+    RAGAS가 생성한 답변(reference)을 원하는 템플릿 형식으로 재작성.
+    템플릿:
+    - "질문에 대한 답변: ..."
+    - "관련 법령 조항: ..."
+    - "추가 설명: ..."
+    """
+    prompt = ChatPromptTemplate.from_template("""너는 법률 QA 데이터셋의 답변을 정해진 템플릿으로 재작성하는 역할이다.
+주어진 질문과 원본 답변을 참고하여, 아래 템플릿 형식으로 재작성해라.
+원본 답변의 내용을 충실히 반영하되, 템플릿에 맞게 구조화해라.
+
+### 템플릿:
+- "질문에 대한 답변: (핵심 답변 1~2문장)"
+- "관련 법령 조항: (법령명 및 조항 번호. 여러 개일 수 있음)"
+- "추가 설명: (보충 설명, 예외사항, 주의점 등. 2~4문장)"
+
+### 입력:
+질문: {question}
+
+원본 답변:
+{original_answer}
+
+### 출력:
+템플릿 형식으로 재작성된 답변만 출력해라. 다른 설명은 하지 마라.""")
+
+    def get_col(row, *names):
+        for n in names:
+            if n in row and pd.notna(row[n]):
+                return row[n]
+        return ""
+
+    new_answers = []
+    for _, row in df.iterrows():
+        question = get_col(row, "user_input", "question")
+        original = get_col(row, "reference", "ground_truth", "answer")
+
+        if not original or not question:
+            new_answers.append(original)
+            continue
+
+        chain = prompt | llm
+        result = chain.invoke({
+            "question": str(question)[:1000],
+            "original_answer": str(original)[:2000]
+        }).content.strip()
+        new_answers.append(result)
+
+    df = df.copy()
+    # reference 컴럼 이름 확인 후 업데이트
+    if "reference" in df.columns:
+        df["reference"] = new_answers
+    elif "ground_truth" in df.columns:
+        df["ground_truth"] = new_answers
+    elif "answer" in df.columns:
+        df["answer"] = new_answers
+    else:
+        df["reference"] = new_answers
+    
+    return df
+
+
 def label_rows(df: pd.DataFrame, llm: ChatOpenAI) -> pd.DataFrame:
     """
-    각 row에 대해 (domain, difficulty, labor_non_statute_ok) 라벨을 부여.
+    각 row에 대해 (domain, labor_non_statute_ok) 라벨을 부여.
     RAGAS DF 컬럼이 버전에 따라 다를 수 있어 넓게 대응.
     """
-    from langchain_core.prompts import ChatPromptTemplate
 
-    prompt = ChatPromptTemplate.from_messages([
-        ("system",
-         "너는 법률 QA 평가 데이터 라벨러다.\n"
-         "입력(질문/정답/컨텍스트 일부)을 보고 다음을 판정한다:\n"
-         "1) 분야: 노동법/민사법/형사법/기타\n"
-         "2) 난이도: 초급/중급/고급\n"
-         "3) (노동법인 경우) 법령 조문만으로 답하기보다, 지침/실무자료/서식/행정해석/가이드/사내규정 등\n"
-         "   '법령 외 문서' 참고가 유리한 질문이면 yes, 아니면 no\n\n"
-         "출력은 반드시 한 줄로만, 다음 형식:\n"
-         "분야|난이도|yes/no\n"
-         "예: 노동법|고급|yes"),
-        ("human",
-         "질문:\n{q}\n\n정답(참고):\n{a}\n\n컨텍스트(발췌):\n{ctx}")
-    ])
+    prompt = ChatPromptTemplate.from_template("""너는 법률 QA 평가 데이터 라벨러다.
+입력(질문/정답/컨텍스트 일부)을 보고 다음을 판정한다:
+
+1) 분야: 노동법/민사법/형사법/기타
+2) (노동법인 경우) 법령 조문만으로 답하기 어렵고, 행정해석/판례/Q&A/판정선례 등
+   '법령 외 문서' 참고가 필요한 질문이면 yes, 아니면 no
+
+출력은 반드시 한 줄로만, 다음 형식:
+분야|yes/no
+예: 노동법|yes
+
+---
+질문:
+{q}
+
+정답(참고):
+{a}
+
+컨텍스트(발췌):
+{ctx}""")
 
     def get_col(row, *names):
         for n in names:
@@ -137,7 +163,6 @@ def label_rows(df: pd.DataFrame, llm: ChatOpenAI) -> pd.DataFrame:
         return ""
 
     domains = []
-    levels = []
     non_statutes = []
 
     for _, row in df.iterrows():
@@ -152,15 +177,13 @@ def label_rows(df: pd.DataFrame, llm: ChatOpenAI) -> pd.DataFrame:
 
         chain = prompt | llm
         out = chain.invoke({"q": str(q)[:800], "a": str(a)[:1200], "ctx": ctx}).content.strip()
-        domain, level, non_statute_ok = parse_label_line(out)
+        domain, non_statute_ok = parse_label_line(out)
 
         domains.append(domain)
-        levels.append(level)
         non_statutes.append(bool(non_statute_ok))
 
     df = df.copy()
     df["domain"] = domains
-    df["difficulty"] = levels
     df["labor_non_statute_ok"] = non_statutes
     return df
 
@@ -168,15 +191,12 @@ def label_rows(df: pd.DataFrame, llm: ChatOpenAI) -> pd.DataFrame:
 def sample_with_quota(df: pd.DataFrame, domain_targets: Dict[str, int]) -> pd.DataFrame:
     """
     domain_targets 예: {"노동법":10, "민사법":5, "형사법":5}
-    각 도메인 내부에서 난이도 쿼터(2:1:1)를 계산해서 충족하도록 샘플링.
+    각 도메인별 목표 개수만큼 샘플링.
     노동법은 labor_non_statute_ok == True 를 우선 채택(가능하면).
-    
-    쿼터 부족 시: 다른 난이도에서 대체 샘플링 (유연 모드)
     """
     picked_frames = []
 
     for domain, n in domain_targets.items():
-        dq = compute_difficulty_quota(n)
         domain_df = df[df["domain"] == domain].copy()
 
         if len(domain_df) == 0:
@@ -188,36 +208,13 @@ def sample_with_quota(df: pd.DataFrame, domain_targets: Dict[str, int]) -> pd.Da
             domain_df["__priority"] = domain_df["labor_non_statute_ok"].apply(lambda x: 0 if x else 1)
             domain_df = domain_df.sort_values(["__priority"])
 
-        picked_ids = set()
-        domain_picked = []
-        shortage = 0  # 부족분 누적
-
-        for level, k in dq.items():
-            sub = domain_df[(domain_df["difficulty"] == level) & (~domain_df.index.isin(picked_ids))]
-            available = len(sub)
-            take = min(available, k)
-            
-            if take < k:
-                shortage += (k - take)
-                print(f"⚠️  [{domain}/{level}] 필요 {k}개, 보유 {available}개 → {take}개 샘플링 (부족 {k - take}개)")
-            
-            if take > 0:
-                sampled = sub.sample(n=take, random_state=42)
-                domain_picked.append(sampled)
-                picked_ids.update(sampled.index)
-
-        # 부족분을 다른 난이도에서 보충
-        if shortage > 0:
-            remaining = domain_df[~domain_df.index.isin(picked_ids)]
-            補充 = min(len(remaining), shortage)
-            if 補充 > 0:
-                print(f"   ↳ [{domain}] 부족분 {shortage}개 중 {補充}개를 다른 난이도에서 보충")
-                補充_sampled = remaining.sample(n=補充, random_state=42)
-                domain_picked.append(補充_sampled)
-                picked_ids.update(補充_sampled.index)
-
-        if domain_picked:
-            picked_frames.extend(domain_picked)
+        # 목표 개수만큼 샘플링
+        take = min(len(domain_df), n)
+        if take < n:
+            print(f"⚠️  [{domain}] 필요 {n}개, 보유 {len(domain_df)}개 → {take}개 샘플링")
+        
+        sampled = domain_df.head(take)
+        picked_frames.append(sampled)
 
     if not picked_frames:
         raise ValueError("샘플링된 데이터가 없습니다. 생성된 풀을 확인해주세요.")
@@ -242,10 +239,6 @@ def load_documents_from_qdrant_by_domain(
     Qdrant에서 분야별로 필요한 문서만 샘플링해서 로드.
     전체 스캔 대신 랜덤 샘플링으로 빠르게 가져옴.
     """
-    from langchain_core.documents import Document
-    from qdrant_client import QdrantClient
-    import random
-
     qdrant_url = os.getenv("QDRANT_URL")
     qdrant_api_key = os.getenv("QDRANT_API_KEY")
     collection = collection_name or os.getenv("QDRANT_COLLECTION_NAME", "A-TEAM")
@@ -272,14 +265,7 @@ def load_documents_from_qdrant_by_domain(
     except Exception as e:
         raise ConnectionError(f"Qdrant 컬렉션 '{collection}'에 연결할 수 없습니다: {e}")
 
-    # 분야별 키워드 패턴
-    domain_patterns = {
-        "노동법": ["노동", "근로", "임금", "해고", "퇴직", "고용", "산재", "산업재해", "근로기준"],
-        "민사법": ["민사", "계약", "손해배상", "채권", "소유", "민법", "부동산", "임대차"],
-        "형사법": ["형사", "범죄", "수사", "형벌", "공소", "형법", "처벌", "피의자"],
-    }
-
-    buckets = {"노동법": [], "민사법": [], "형사법": [], "기타": []}
+    buckets = {"노동법": [], "노동법_법령외": [], "민사법": [], "형사법": [], "기타": []}
     
     # 다양성 확보를 위한 분산 샘플링
     sample_size = min(docs_per_domain * 6, 5000)
@@ -390,18 +376,23 @@ def load_documents_from_qdrant_by_domain(
 
     print(f"   ✅ {len(all_sampled)}개 문서 샘플링 완료")
 
-    # 분야별 분류 (다양성 확보를 위해 분야별로 균등하게 분산)
+    # 분야별 분류
+    # 법령 외 문서의 source 값들 (모두 노동법 관련)
+    # interpretation: 행정해석, case_law: 주요판정사례, moel_qa: 고용노동부QA, 판정선례: 결정선례
+    non_statute_sources = {"interpretation", "case_law", "moel_qa", "판정선례"}
+    
     def classify_domain(doc) -> str:
         meta = doc.metadata or {}
-        cat = str(meta.get("category", ""))
-        law = str(meta.get("law_name", ""))
+        # 1. 법령 여부: law_name(또는 law_id)이 있으면 법령
+        if meta.get("law_name") or meta.get("law_id"):
+            category = str(meta.get("category", ""))
+            if category in buckets:
+                return category
+            return "기타"
+        # 2. 법령 외 문서: source로 분류
         src = str(meta.get("source", ""))
-        text_preview = doc.page_content[:200] if doc.page_content else ""
-        hay = f"{cat} {law} {src} {text_preview}"
-
-        for domain, keywords in domain_patterns.items():
-            if any(kw in hay for kw in keywords):
-                return domain
+        if src in non_statute_sources:
+            return "노동법_법령외"
         return "기타"
 
     # 셔플해서 순서 랜덤화 (같은 법률이 연속으로 오는 것 방지)
@@ -419,9 +410,11 @@ def load_documents_from_qdrant_by_domain(
     print(f"\n📄 분야별 로드 완료:")
     for k, v in buckets.items():
         if v:
-            # 해당 분야의 법률명 다양성 체크
-            law_names = set(doc.metadata.get("law_name", "알 수 없음") for doc in v if doc.metadata.get("law_name"))
-            print(f"   📌 {k}: {len(v)} docs (법률 {len(law_names)}종류)")
+            # 해당 분야의 문서 다양성 체크 (법령 + 법령외)
+            law_names = set(doc.metadata.get("law_name") for doc in v if doc.metadata.get("law_name"))
+            sources = set(doc.metadata.get("source", "") for doc in v)
+            non_statute_count = sum(1 for doc in v if not doc.metadata.get("law_name"))
+            print(f"   📌 {k}: {len(v)} docs (법령 {len(law_names)}종류, 법령외 {non_statute_count}개)")
         else:
             print(f"   📌 {k}: {len(v)} docs")
 
@@ -463,8 +456,6 @@ def setup_generator(model_name: str = "gpt-4o-mini") -> TestsetGenerator:
 
 
 def generate_testset(generator: TestsetGenerator, documents: list, test_size: int) -> pd.DataFrame:
-    from ragas.run_config import RunConfig
-
     run_config = RunConfig(
         max_retries=3,
         max_wait=60,
@@ -482,47 +473,7 @@ def generate_testset(generator: TestsetGenerator, documents: list, test_size: in
     return testset.to_pandas()
 
 
-def make_labor_mixed_docs(labor_docs: list, max_docs: int) -> list:
-    """
-    노동법 문서 중 '법령 외 문서'가 섞이도록 간단히 믹스.
-    - law_name이 비어있거나 chunk_type이 법령 청크가 아닌 것들을 non-statute로 간주
-    """
-    statutes = []
-    non_statutes = []
-    for d in labor_docs:
-        meta = d.metadata or {}
-        law_name = str(meta.get("law_name", "")).strip()
-        chunk_type = str(meta.get("chunk_type", "")).strip().lower()
-
-        if law_name and ("law" in chunk_type or chunk_type in ("law", "statute", "조문", "법령")):
-            statutes.append(d)
-        elif law_name:
-            # law_name은 있는데 chunk_type이 애매하면 일단 statute로 분류
-            statutes.append(d)
-        else:
-            non_statutes.append(d)
-
-    # 70% statute + 30% non-statute 목표(가능한 만큼)
-    target_non = int(max_docs * 0.3)
-    target_stat = max_docs - target_non
-
-    picked = []
-    if statutes:
-        picked += statutes[:min(len(statutes), target_stat)]
-    if non_statutes:
-        picked += non_statutes[:min(len(non_statutes), target_non)]
-
-    # 부족하면 나머지로 채움
-    if len(picked) < max_docs:
-        rest = [d for d in labor_docs if d not in picked]
-        picked += rest[: (max_docs - len(picked))]
-
-    return picked[:max_docs]
-
-
 def main():
-    import argparse
-
     parser = argparse.ArgumentParser(description="RAGAS 기반 Golden Set 생성(커스텀 쿼터/난이도)")
     parser.add_argument('--collection', type=str, default=None)
     parser.add_argument('--docs-per-domain', type=int, default=500, help="분야별 샘플링할 문서 수(기본 500)")
@@ -559,14 +510,23 @@ def main():
     # 3) 분야별로 풀 생성(충분히 크게)
     frames = []
     for domain, target_n in domain_targets.items():
-        docs = buckets.get(domain, [])
+        # 노동법은 법령 + 법령외 합쳐서 사용
+        if domain == "노동법":
+            labor_law_docs = buckets.get("노동법", [])
+            labor_extra_docs = buckets.get("노동법_법령외", [])
+            docs = labor_law_docs + labor_extra_docs
+        else:
+            docs = buckets.get(domain, [])
+        
         if not docs:
             print(f"⚠️  '{domain}' 문서가 없습니다. 스킵합니다.")
             continue
 
-        # 노동법은 비법령 문서 섞이도록 믹스
+        # 노동법은 법령 + 법령외 문서를 함께 제공 (RAGAS가 자연스럽게 질문 생성)
         if domain == "노동법":
-            docs_for_gen = make_labor_mixed_docs(docs, max_docs=min(len(docs), 300))
+            all_labor_docs = labor_law_docs + labor_extra_docs
+            random.shuffle(all_labor_docs)
+            docs_for_gen = all_labor_docs[:min(len(all_labor_docs), 300)]
         else:
             docs_for_gen = docs[:min(len(docs), 300)]
 
@@ -579,16 +539,20 @@ def main():
     df_all = pd.concat(frames, ignore_index=True)
     print(f"\n✅ 전체 풀 생성 완료: {len(df_all)} rows")
 
-    # 5) 라벨링
+    # 5) 답변 템플릿 재작성
     labeler = build_labeler_llm(args.model)
-    print("\n🏷️  라벨링 중(분야/난이도/노동-비법령참고)...")
+    print("\n📝 답변 템플릿 재작성 중...")
+    df_all = reformat_answers(df_all, labeler)
+
+    # 6) 라벨링
+    print("\n🏷️  라벨링 중(분야/노동-비법령참고)...")
     df_labeled = label_rows(df_all, labeler)
 
-    # 6) 쿼터 샘플링(부족하면 에러로 알림)
-    print("\n🎯 쿼터 샘플링 중...")
+    # 7) 분야별 샘플링
+    print("\n🎯 샘플링 중...")
     df_selected = sample_with_quota(df_labeled, domain_targets)
 
-    # 7) 저장
+    # 8) 저장
     script_dir = Path(__file__).parent
     output_dir = script_dir.parent / "data" / "evaluation"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -598,7 +562,7 @@ def main():
 
     print(f"\n💾 저장 완료: {output_path}")
     print("\n📊 최종 분포:")
-    print(df_selected.groupby(["domain", "difficulty"]).size().to_string())
+    print(df_selected["domain"].value_counts().to_string())
     print("\n(노동법) 비법령참고가능 개수:", int(df_selected[df_selected["domain"] == "노동법"]["labor_non_statute_ok"].sum()))
 
 
