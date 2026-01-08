@@ -42,6 +42,7 @@ from qdrant_client import QdrantClient
 # LangGraph
 from langgraph.graph.message import add_messages
 from langgraph.graph import StateGraph, END
+from langchain_core.runnables import RunnableLambda
 
 
 # ============================================================
@@ -67,13 +68,13 @@ class Config:
     # [2] RAG Settings - 검색 및 처리 설정
     # ═══════════════════════════════════════════════════════════
     VECTOR_DIM: int = 1024
-    TOP_K_VECTOR: int = 15
-    TOP_K_BM25: int = 15
-    TOP_K_RERANK: int = 7
-    TOP_K_FINAL: int = 5
-    RELEVANCE_THRESHOLD: float = 0.2
-    BM25_SAMPLE_SIZE: int = 2000
-    MAX_RETRY: int = 2
+    TOP_K_VECTOR: int = 15                  # Vector Search k (15 -> 10)
+    TOP_K_BM25: int = 15                    # BM25 Search k (15 -> 10)
+    TOP_K_RERANK: int = 5                   # Reranker 후 상위 k개
+    TOP_K_FINAL: int = 5                    # 최종 답변 생성에 사용할 문서 수
+    RELEVANCE_THRESHOLD: float = 0.2        # 유사도 임계값
+    BM25_SAMPLE_SIZE: int = 2000            # BM25 인덱싱용 샘플 수
+    MAX_RETRY: int = 2                      # 재검색 최대 횟수
 
     # ═══════════════════════════════════════════════════════════
     # [3] Qdrant - 벡터 DB 설정
@@ -116,22 +117,37 @@ class Config:
 - needs_clarification: 1~2단어만 있어 답변 불가능한 경우에만 true
 - needs_case_law: 판례 언급 또는 법적 해석 쟁점이 있는 경우 true"""
 
-    # --- [노드: Generate] 답변 생성용 프롬프트 ---
-    PROMPT_GENERATE: str = """당신은 법률 전문 AI 어시스턴트 'A-TEAM 봇'입니다.
+    # --- [노드: Generate] Chain of Thought + In-Context Citation 프롬프트 ---
+    PROMPT_GENERATE: str = """당신은 엄격한 기준을 가진 법률 AI 'A-TEAM'입니다.
 
-역할:
-- 검색된 법률 문서를 바탕으로 정확하고 친절하게 답변합니다.
-- 법령명, 조항 등 구체적인 근거를 제시합니다.
-- 법률 용어는 쉽게 풀어서 설명합니다.
+## 핵심 원칙
+1. **증거 기반**: 반드시 제공된 [검색된 문서]에 있는 내용만 사용하세요.
+2. **Hallucination 금지**: 문서에 없는 법조문, 판례, 사실을 지어내지 마세요.
+3. **엄격한 인용**: 모든 사실적 진술 뒤에 반드시 출처 인덱스를 표기하세요. (예: ...지급해야 합니다[1].)
 
-답변 작성 규칙:
-1. 검색된 자료를 근거로 답변하세요.
-2. 답변 구조: 📌 결론 → 📖 법적 근거 → 💡 추가 설명
-3. 관련 법령과 조항을 [법령명 제X조]처럼 명시하세요.
-4. 확실하지 않은 내용은 "~로 해석될 수 있습니다" 등으로 신중하게 표현하세요.
-5. 검색된 문서에 없는 내용은 추측하지 마세요.
-6. 전문 법률 상담이 필요한 경우 안내하세요.
-7. 한국어로 답변하세요."""
+## 답변 형식 (반드시 이 구조로 작성)
+
+**🤔 분석**
+(질문의 법적 쟁점과 적용 가능한 법조항을 분석하세요. 검색된 문서와 질문 간의 연결고리를 서술합니다.)
+
+**📌 결론**
+(핵심 답변을 1-2문장으로 명확하게 작성하세요. 반드시 출처 번호를 붙이세요[1].)
+
+**📖 법적 근거**
+- [법령명 제X조]: 해당 조항 내용 요약 [1]
+- [관련 규정]: 추가 근거 요약 [2]
+
+**💡 유의 사항**
+(해석상 주의점, 예외 상황, 추가 확인이 필요한 사항을 안내하세요.)
+
+## 인용 규칙
+- 검색된 문서는 [문서 1], [문서 2], ... 형태로 제공됩니다.
+- 답변에서 해당 문서를 인용할 때는 [1], [2], ... 로 표기하세요.
+- 문서에 정보가 없으면 "제공된 문서에서 관련 정보를 찾을 수 없습니다"라고 명시하세요.
+
+## 언어
+- 한국어로 답변하세요.
+- 법률 용어는 쉽게 풀어서 설명하세요."""
 
     # --- [노드: Evaluate] 답변 평가용 프롬프트 ---
     PROMPT_EVALUATE: str = """당신은 법률 답변의 품질을 평가하는 비평가입니다.
@@ -211,12 +227,21 @@ class JinaReranker(BaseDocumentCompressor):
         if top_n:
             self.top_n = top_n
 
-        logger.info(f"Loading Reranker: {self.model_name}")
+        # Device selection: CUDA > MPS > CPU
+        if torch.cuda.is_available():
+            self.device = "cuda"
+        elif torch.backends.mps.is_available():
+            self.device = "mps"
+        else:
+            self.device = "cpu"
+
+        logger.info(f"Loading Reranker: {self.model_name} on {self.device}")
         self.tokenizer = AutoTokenizer.from_pretrained(
             self.model_name, trust_remote_code=True)
         self.model = AutoModelForSequenceClassification.from_pretrained(
             self.model_name, trust_remote_code=True, torch_dtype="auto"
         )
+        self.model.to(self.device)
         self.model.eval()
         logger.info("Reranker loaded successfully")
 
@@ -233,6 +258,9 @@ class JinaReranker(BaseDocumentCompressor):
                 pairs, padding=True, truncation=True,
                 return_tensors="pt", max_length=512
             )
+            # Move inputs to device
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
             scores = self.model(**inputs).logits.squeeze(-1).float().cpu()
             scores = torch.sigmoid(scores).tolist()
             if not isinstance(scores, list):
@@ -549,10 +577,16 @@ class LegalRAGBuilder:
 
             all_docs = []
 
-            # 1. Vector Search - HyDE passage 사용
+            # 1. Vector Search - HyDE passage 사용 (LangSmith 추적을 위해 RunnableLambda 사용)
             try:
-                vector_results = vectorstore.similarity_search_with_score(
-                    vector_query, k=config.TOP_K_VECTOR)  # <-- hyde_passage 또는 semantic_query
+                # Vector Search를 Runnable로 감싸서 트레이싱에 보이게 함
+                vector_search_runnable = RunnableLambda(
+                    lambda q: vectorstore.similarity_search_with_score(
+                        q, k=config.TOP_K_VECTOR)
+                ).with_config({"run_name": "VectorSearch"})
+
+                vector_results = vector_search_runnable.invoke(vector_query)
+
                 vector_docs = [doc for doc, _ in vector_results]
                 for doc in vector_docs:
                     doc.metadata["search_source"] = "vector"
@@ -574,28 +608,48 @@ class LegalRAGBuilder:
                 except Exception as e:
                     logger.error(f"BM25 search error: {e}")
 
-            # 3. Deduplicate
-            seen = set()
-            unique_docs = []
-            for doc in all_docs:
-                h = hash(doc.page_content[:200])
-                if h not in seen:
-                    seen.add(h)
-                    unique_docs.append(doc)
+            # 3. Deduplicate (LangSmith Traceable)
+            def deduplicate_logic(docs: List[Document]) -> List[Document]:
+                seen = set()
+                unique = []
+                for doc in docs:
+                    h = hash(doc.page_content[:200])
+                    if h not in seen:
+                        seen.add(h)
+                        unique.append(doc)
+                return unique
 
+            dedup_runnable = RunnableLambda(deduplicate_logic).with_config({
+                "run_name": "Deduplication"})
+            unique_docs = dedup_runnable.invoke(all_docs)
             logger.info(f"After dedup: {len(unique_docs)} docs")
 
             if not unique_docs:
                 return {"retrieved_docs": []}
 
-            # 4. Rerank
-            try:
-                reranked_docs = reranker.compress_documents(
-                    unique_docs, original_query)
+            # 4. Reranking (LangSmith Traceable)
+            def rerank_logic(input_data: dict) -> List[Document]:
+                _docs = input_data["docs"]
+                _query = input_data["query"]
+                if not reranker:
+                    return _docs
+                return reranker.compress_documents(_docs, _query)
 
-                # 5. Boost related laws
+            rerank_runnable = RunnableLambda(rerank_logic).with_config({
+                "run_name": "Reranking"})
+
+            try:
+                reranked_docs = rerank_runnable.invoke(
+                    {"docs": unique_docs, "query": original_query})
+            except Exception as e:
+                logger.error(f"Rerank error: {e}")
+                reranked_docs = unique_docs
+
+            # 5. Filtering & Boosting (LangSmith Traceable)
+            def filter_logic(docs: List[Document]) -> List[Document]:
+                # Boost
                 if related_laws:
-                    for doc in reranked_docs:
+                    for doc in docs:
                         law_name = doc.metadata.get('law_name', '')
                         for rel_law in related_laws:
                             if rel_law in law_name:
@@ -605,19 +659,24 @@ class LegalRAGBuilder:
                                 doc.metadata['boosted'] = True
                                 break
 
-                # 6. Filter by threshold
-                filtered_docs = [
-                    doc for doc in reranked_docs
-                    if doc.metadata.get('relevance_score', 0) >= config.RELEVANCE_THRESHOLD
+                # Filter
+                filtered = [
+                    d for d in docs
+                    if d.metadata.get('relevance_score', 0) >= config.RELEVANCE_THRESHOLD
                 ]
 
-                logger.info(f"After rerank/filter: {len(filtered_docs)} docs")
+                # Sort & Top-K
+                filtered.sort(key=lambda x: x.metadata.get(
+                    'relevance_score', 0), reverse=True)
+                return filtered[:config.TOP_K_FINAL]
 
-                return {"retrieved_docs": filtered_docs[:config.TOP_K_FINAL]}
+            filter_runnable = RunnableLambda(filter_logic).with_config({
+                "run_name": "Filtering"})
+            final_docs = filter_runnable.invoke(reranked_docs)
 
-            except Exception as e:
-                logger.error(f"Rerank error: {e}")
-                return {"retrieved_docs": unique_docs[:config.TOP_K_FINAL]}
+            logger.info(f"Final selected: {len(final_docs)} docs")
+
+            return {"retrieved_docs": final_docs}
 
         return search_documents
 
