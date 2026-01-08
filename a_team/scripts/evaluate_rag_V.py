@@ -12,7 +12,7 @@ Usage:
     uv run a_team/scripts/evaluate_rag_V1.py --sample 10
 
     # 커스텀 골든셋 경로
-    uv run a_team/scripts/evaluate_rag_V1.py --golden-set a_team/data/evaluation/golden_set_quota_20.json
+    uv run a_team/scripts/evaluate_rag_other.py --golden-set a_team/data/evaluation/golden_set_quota_20.json
 """
 
 import os
