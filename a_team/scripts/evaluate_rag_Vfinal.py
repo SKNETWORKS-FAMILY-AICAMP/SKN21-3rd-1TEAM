@@ -6,13 +6,13 @@ Ragas 메트릭(Faithfulness, Answer Relevancy, Context Precision/Recall)을 계
 
 Usage:
     # 기본 실행
-    uv run a_team/scripts/evaluate_rag_V1.py
+    uv run a_team/scripts/evaluate_rag_Vfinal.py
 
     # 샘플 수 지정 (테스트용)
-    uv run a_team/scripts/evaluate_rag_V1.py --sample 10
+    uv run a_team/scripts/evaluate_rag_Vfinal.py --sample 10
 
     # 커스텀 골든셋 경로
-    uv run a_team/scripts/evaluate_rag_other.py --golden-set a_team/data/evaluation/golden_set_quota_20.json
+    uv run a_team/scripts/evaluate_rag_Vfinal.py --golden-set a_team/data/evaluation/golden_set_quota_20.json
 """
 
 import os
@@ -142,9 +142,10 @@ def run_inference(questions: List[str], chatbot_version: str = "v3", verbose: bo
     elif chatbot_version.lower() == "v7":
         from chatbot_graph_V7 import initialize_langgraph_chatbot
     elif chatbot_version.lower() == "v8":
-        from chatbot_graph_V8 import initialize_langgraph_chatbot
+        # V8는 architectures 폴더에 있음 - initialize_rag_chatbot 사용
+        from architectures.chatbot_graph_V8 import initialize_rag_chatbot as initialize_langgraph_chatbot
     elif chatbot_version.lower() == "v9":
-        from chatbot_graph_V9 import initialize_langgraph_chatbot
+        from architectures.chatbot_graph_V9 import initialize_rag_chatbot as initialize_langgraph_chatbot
     else:
         raise ValueError(f"지원하지 않는 챗봇 버전입니다: {chatbot_version}")
 
