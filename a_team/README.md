@@ -24,17 +24,34 @@
 
 ### 1.3. 데이터 흐름 (Workflow)
 
-```mermaid
-graph TD
-    Start([User Input]) --> Analyze
-    Analyze -->|Need Info?| Clarify
-    Analyze -->|Ready| Search
-    Clarify --> End([End])
-    Search --> Generate
-    Generate --> Evaluate
-    Evaluate -->|Satisfied| End
-    Evaluate -->|Unsatisfied| Search
+```text
+[ User Input ]
+      │
+      ▼
+[ 🧠 Analyze Query ] ──(정보가 더 필요해??)──▶ [ 🗣️ 정보 요청 ]
+      │
+      │ (Ready)
+      ▼
+[ 🔀 Query Expansion ]
+      │
+      ├──▶  Vector Search (Qdrant)
+      ├──▶  Keyword Search (BM25)
+      ├──▶  HyDE
+      ▼
+[ 📉 Jina Reranking + Filtering ]
+      │
+      ▼
+[ ✍️ Generate Answer (CoT) ]
+      │
+      ▼
+[ ⚖️ Evaluate Quality ] ──(Fail)──▶ (Retry Search)
+      │
+      │ (Pass)
+      ▼
+[ ✅ Final Answer ]
 ```
+
+![alt text](./data/images/image.png)
 
 1. **Analyze**: 사용자 질문을 분석하여 `intent_type`(법령조회/판례검색 등)과 `category`(노동/민사 등)를 파악합니다.
 2. **Clarify**: 질문이 너무 모호한 경우 명확화를 위한 역질문을 생성합니다.
@@ -55,7 +72,7 @@ graph TD
 - **대상 파일**: `rd_노동법.json`, `rd_민사법.json`, `rd_형사법.json`
 - **전처리 로직**:
   - **HTML 정제**: 불필요한 태그 제거 및 `<개정 2021. 1. 5.>` 형태를 `[개정 2021.1.5]`로 간소화.
-  - **헤더 정규화**: `부 칙` -> `부칙`, `별 표` -> `별표` 등의 공백 정규화.
+  - **헤더 정규화**: `부      칙` -> `부칙`, `별       표` -> `별표` 등의 공백 정규화.
 - **청킹 및 구조화**:
   - **조문 (Article)**: 각 조문을 기본 청크 단위로 합니다.
     - 내용이 **500자**를 초과할 경우, **100자 Overlap**을 적용하여 분할합니다.
@@ -100,11 +117,15 @@ graph TD
 - **결론**: 법률 도메인에서는 단순 검색을 넘어, 질문의 의도를 파악해 '관련 법령'을 먼저 특정하고 필터링하는 **Metadata Filtering** 전략이 필수적임을 깨달았습니다.
 
 ## 4. 디렉토리 구조
+
 ### 4.1. 트리 구조
+
 <img src="SKN21-3rd-1Team-A_directory.png" width="60%" alt="A-Team Directory Structure">
 
 ### 4.2. 디렉토리별 설명
+
 #### 📁 data/
+
 - **raw/**: 크롤링한 원본 JSON 및 PDF 파일
   - 법령 데이터 (노동법, 민사법, 형사법)
   - 법령외 데이터 (결정선례, QA, 판정사례, 행정해석)
@@ -115,19 +136,21 @@ graph TD
   - 평가 결과 (baseline, V1~V8)
 
 #### 📁 scripts/
+
 - **architectures/**: 챗봇 구현 버전들
   - [chatbot_baseline.py](scripts/architectures/chatbot_baseline.py): 기본 구현
   - [chatbot_chain_V2.py](scripts/architectures/chatbot_chain_V2.py) ~ [chatbot_chain_V3.py](scripts/architectures/chatbot_chain_V3.py): LangChain 기반
   - [chatbot_graph_V8_FINAL.py](scripts/architectures/chatbot_graph_V8_FINAL.py): LangGraph 기반 최신 버전 ⭐
 - **crawlers/**: 데이터 수집(크롤링) 스크립트
 - **data_preprocessing/**: 데이터 전처리
-  - [preprocesser_법령.py](scripts/data_preprocessing/preprocesser_법령.py), [preprocesser_법령외.py](scripts/data_preprocessing/preprocesser_법령외.py): 전처리 스크립트
-  - [vectorizer_법령.py](scripts/data_preprocessing/vectorizer_법령.py), [vectorizer_법령외.py](scripts/data_preprocessing/vectorizer_법령외.py): 벡터화 스크립트
+  - [preprocesser\_법령.py](scripts/data_preprocessing/preprocesser_법령.py), [preprocesser\_법령외.py](scripts/data_preprocessing/preprocesser_법령외.py): 전처리 스크립트
+  - [vectorizer\_법령.py](scripts/data_preprocessing/vectorizer_법령.py), [vectorizer\_법령외.py](scripts/data_preprocessing/vectorizer_법령외.py): 벡터화 스크립트
 - **평가 및 생성 스크립트**:
   - [evaluate_rag_baseline.py](scripts/evaluate_rag_baseline.py) ~ [evaluate_rag_Vfinal.py](scripts/evaluate_rag_Vfinal.py): RAG 평가
   - [generate_evaldata_V2.py](scripts/generate_evaldata_V2.py): 평가 데이터셋 생성
 
 #### 통계
+
 - 총 파일 수: 약 60개
 - 총 데이터 크기: ~200 MB (raw + processed)
 - 챗봇 버전: 12개 (baseline + chain 2개 + graph 8개)
