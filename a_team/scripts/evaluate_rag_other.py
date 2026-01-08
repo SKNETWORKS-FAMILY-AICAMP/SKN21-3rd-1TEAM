@@ -12,7 +12,7 @@ Usage:
     uv run a_team/scripts/evaluate_rag_V1.py --sample 10
 
     # 커스텀 골든셋 경로
-    uv run a_team/scripts/evaluate_rag_V1.py --golden-set path/to/golden_set.json
+    uv run a_team/scripts/evaluate_rag_V1.py --golden-set a_team/data/evaluation/golden_set_quota_20.json
 """
 
 import os
@@ -29,7 +29,6 @@ from tqdm import tqdm
 
 # Ragas 평가 메트릭
 from ragas import evaluate
-from ragas.run_config import RunConfig
 from ragas.metrics import (
     Faithfulness,
     ResponseRelevancy,
@@ -237,10 +236,7 @@ def evaluate_with_ragas(
     contexts: List[List[str]],
     references: List[str],
     llm_model: str = "gpt-4o",
-    embedding_model: Any = None,
-    max_workers: int = 2,
-    timeout: int = 90,
-    max_retries: int = 2
+    embedding_model: Any = None
 ) -> Dict[str, Any]:
     """
     Ragas 메트릭으로 RAG 성능을 평가합니다.
@@ -266,9 +262,7 @@ def evaluate_with_ragas(
     })
 
     # 평가용 LLM 및 Embeddings 설정
-    eval_llm = LangchainLLMWrapper(
-        ChatOpenAI(model=llm_model, temperature=0, timeout=timeout, max_retries=max_retries)
-    )
+    eval_llm = LangchainLLMWrapper(ChatOpenAI(model=llm_model, temperature=0))
     eval_embeddings = LangchainEmbeddingsWrapper(
         embedding_model) if embedding_model else None
 
@@ -287,8 +281,7 @@ def evaluate_with_ragas(
             metrics=metrics,
             llm=eval_llm,
             embeddings=eval_embeddings,
-            raise_exceptions=False,
-            run_config=RunConfig(max_workers=max_workers, timeout=timeout, max_retries=max_retries, max_wait=30)
+            raise_exceptions=False
         )
 
         print("✅ Ragas 평가 완료")
@@ -418,24 +411,6 @@ def main():
         help='Ragas 평가에 사용할 LLM 모델'
     )
     parser.add_argument(
-        '--max-workers',
-        type=int,
-        default=2,
-        help='Ragas 평가 시 동시 LLM 호출 개수 (TPM 제한 회피용, 기본 2)'
-    )
-    parser.add_argument(
-        '--llm-timeout',
-        type=int,
-        default=90,
-        help='Ragas 평가 LLM 타임아웃 초 (기본 90s)'
-    )
-    parser.add_argument(
-        '--llm-retries',
-        type=int,
-        default=2,
-        help='Ragas 평가 LLM 재시도 횟수 (기본 2)'
-    )
-    parser.add_argument(
         '--dry-run',
         action='store_true',
         help='데이터 로드만 테스트하고 종료'
@@ -503,10 +478,7 @@ def main():
         contexts=contexts,
         references=references,
         llm_model=args.eval_model,
-        embedding_model=embeddings,
-        max_workers=args.max_workers,
-        timeout=args.llm_timeout,
-        max_retries=args.llm_retries
+        embedding_model=embeddings
     )
     # 4. 결과 저장 (출력 전에 먼저 저장!)
     if args.output:
