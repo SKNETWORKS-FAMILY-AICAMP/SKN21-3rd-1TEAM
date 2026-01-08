@@ -19,12 +19,14 @@ from dotenv import load_dotenv
 
 from qdrant_client import QdrantClient
 from langchain_qdrant import QdrantVectorStore
-from a_team.scripts.bm25_search import BM25KeywordRetriever
 from langchain_huggingface import HuggingFaceEmbeddings
+from whoosh.index import open_dir
+from whoosh.qparser import QueryParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from langchain_core.documents import Document, BaseDocumentCompressor
+from langchain_core.retrievers import BaseRetriever
 from pydantic import Field
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
@@ -35,6 +37,14 @@ from langgraph.graph.message import add_messages
 _DOTENV_PATH = Path(__file__).with_name(".env")
 load_dotenv(dotenv_path=_DOTENV_PATH)
 
+# LangSmith 추적 상태 확인 및 출력
+_langsmith_tracing = os.getenv("LANGCHAIN_TRACING_V2", "").lower() in ["true", "1", "yes"]
+_langsmith_project = os.getenv("LANGCHAIN_PROJECT", "default")
+if _langsmith_tracing:
+    print(f"✅ LangSmith 추적 활성화됨 (프로젝트: {_langsmith_project})")
+else:
+    print("⚠️  LangSmith 추적이 비활성화되어 있습니다.")
+
 
 class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
@@ -43,15 +53,43 @@ class AgentState(TypedDict):
     generated_answer: Optional[str]
 
 
+class BM25KeywordRetriever(BaseRetriever):
+    """LangChain BaseRetriever를 상속한 BM25/keyword 기반 검색기 (Whoosh 사용)"""
+    index_dir: str
+    content_field: str = "text"
+    k: int = 5
+    ix: Any = Field(default=None, exclude=True)
+    parser: Any = Field(default=None, exclude=True)
+
+    model_config = {"arbitrary_types_allowed": True}
+
+    def model_post_init(self, __context: Any) -> None:
+        """Pydantic V2 방식의 초기화"""
+        super().model_post_init(__context)
+        self.ix = open_dir(self.index_dir)
+        self.parser = QueryParser(self.content_field, schema=self.ix.schema)
+
+    def _get_relevant_documents(self, query: str) -> List[Document]:
+        """LangChain Retriever 표준 메서드 구현"""
+        with self.ix.searcher() as searcher:
+            q = self.parser.parse(query)
+            results = searcher.search(q, limit=self.k)
+            docs = []
+            for hit in results:
+                docs.append(Document(
+                    page_content=hit[self.content_field],
+                    metadata=dict(hit)
+                ))
+            return docs
+
+
 class JinaReranker(BaseDocumentCompressor):
     model_name: str = "jinaai/jina-reranker-v2-base-multilingual"
     top_n: int = 6
     model: Any = None
     tokenizer: Any = None
 
-    class Config:
-        arbitrary_types_allowed = True
-        extra = "allow"
+    model_config = {"arbitrary_types_allowed": True, "extra": "allow"}
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -151,6 +189,7 @@ def create_search_node(vectorstore: QdrantVectorStore):
         # 1. 벡터 검색 (cosine similarity)
         for q in variants:
             try:
+                # score가 필요하므로 similarity_search_with_score 사용
                 res = vectorstore.similarity_search_with_score(q, k=10)
                 all_docs.extend([doc for doc, score in res])
                 vector_scores.extend([score for doc, score in res])
@@ -179,7 +218,7 @@ def create_search_node(vectorstore: QdrantVectorStore):
             if bm25_retriever:
                 for q in retry_variants:
                     try:
-                        bm25_docs = bm25_retriever.search(q, k=5)
+                        bm25_docs = bm25_retriever.get_relevant_documents(q)
                         all_docs.extend(bm25_docs)
                     except Exception as e:
                         print(f"⚠️  [BM25 재검색 오류] {e}")
@@ -188,7 +227,7 @@ def create_search_node(vectorstore: QdrantVectorStore):
             if bm25_retriever:
                 for q in variants:
                     try:
-                        bm25_docs = bm25_retriever.search(q, k=5)
+                        bm25_docs = bm25_retriever.get_relevant_documents(q)
                         all_docs.extend(bm25_docs)
                     except Exception as e:
                         print(f"⚠️  [BM25 검색 오류] {e}")
@@ -228,7 +267,7 @@ def create_generate_node(llm):
             사용자의 질문에 대해 저장된 법률 조항 데이터와 관련 정보(판례, 행정해석 등)를 기반으로 정확하고 신뢰성 있는 답변을 제공하세요.
             1. 답변 작성 기본 지침 
                 - 법률 조항에 관한 질문이라면 그 조항에 관한 전체 내용을 가져온다.
-                - 예를들어 '근로기준법 제1조의 내용'이라는 질문을 받으면 근로기준법 제1조의 조항을 전부 다 답변한다.
+                - 예를 들어 '근로기준법 제1조의 내용'이라는 질문을 받으면 근로기준법 제1조의 조항을 전부 다 답변한다.
                 - 질문 유형에 따라 관련 정보를 구조적으로 작성하며, 중요 세법 조문과 요약된 내용을 포함합니다.
                 - 비전문가도 이해할 수 있도록 용어를 친절히 설명합니다.
             2. 답변 작성 세부 지침:
@@ -242,10 +281,6 @@ def create_generate_node(llm):
                 - **정확성**:
                     - 법령 및 법률에 관한질문은 추가적인 내용없이 한가지 content에 집중하여 답변한다.
                     - 조항에 대한 질문은 시행령이나 시행규칙보단 해당법에서 가져오는것에 집중한다.
-            3. 추가적인 사용자 지원:
-                - 답변 후 사용자에게 주제와 관련된 후속 질문 두 가지를 제안합니다.
-                - 후속 질문은 사용자가 더 깊이 탐구할 수 있도록 설계하며, 각 질문 앞뒤에 한 줄씩 띄어쓰기를 합니다.
-
             4. 예외 상황 처리:
                 - 사용자가 질문을 모호하게 작성한 경우:
                     - "질문이 명확하지 않습니다. 구체적으로 어떤 부분을 알고 싶으신지 말씀해 주시겠어요?"와 같은 문구로 추가 정보를 요청합니다.
@@ -258,10 +293,23 @@ def create_generate_node(llm):
                 - 질문이 복합적인 경우, 각 하위 질문에 대해 별도로 답변하거나, 사용자에게 우선순위를 확인합니다.
 
             6. 예시 답변 템플릿:
-                - "질문에 대한 답변: ..."
-                - "관련 세법 조항: ..."
-                - "추가 설명: ..."
+                📋 "답변: ..."
+                    - "질문에 대한 답변"
+                💡 "추가 정보: ..."
+                    - "추가 정보 제시"
+                ⚖️ "관련 조항: ..."
+                    - "관련 조항 제시"
                 - 위는 "예시" 템플릿으로, 예정 답변이 템플릿과 일치하지 않을 경우 수정 가능합니다."""
+        ),
+        (
+            "user",
+            """다음은 검색된 법률 근거 자료입니다:
+
+{context}
+
+사용자 질문: {query}
+
+위 법률 근거를 바탕으로 사용자의 질문에 답변해주세요."""
         ),
     ])
 
@@ -388,7 +436,13 @@ def main():
                 print("🔄 워크플로우 실행 중...")
                 print("-" * 60 + "\n")
 
-                result = graph.invoke(initial_state)
+                # LangSmith 추적을 위한 config 설정
+                config = {
+                    "run_name": f"법률_RAG_질의_{user_input[:20]}",
+                    "tags": ["법률챗봇", "RAG", "LangGraph"],
+                }
+                
+                result = graph.invoke(initial_state, config=config)
                 answer = result.get("generated_answer", "")
                 if answer:
                     print("\n" + "=" * 60)

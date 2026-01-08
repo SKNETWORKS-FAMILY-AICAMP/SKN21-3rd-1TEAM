@@ -29,6 +29,27 @@ _DOTENV_PATH = Path(__file__).with_name(".env")
 load_dotenv(dotenv_path=_DOTENV_PATH)
 
 
+class BM25KeywordRetriever:
+    """간단한 BM25/keyword 기반 검색기 (Whoosh 사용)"""
+    def __init__(self, index_dir: str, content_field: str = "text"):
+        self.index_dir = index_dir
+        self.content_field = content_field
+        self.ix = open_dir(index_dir)
+        self.parser = QueryParser(content_field, schema=self.ix.schema)
+
+    def search(self, query: str, k: int = 5) -> List[Document]:
+        with self.ix.searcher() as searcher:
+            q = self.parser.parse(query)
+            results = searcher.search(q, limit=k)
+            docs = []
+            for hit in results:
+                docs.append(Document(
+                    page_content=hit[self.content_field],
+                    metadata=dict(hit)
+                ))
+            return docs
+            
+
 class JinaReranker(BaseDocumentCompressor):
     model_name: str = "jinaai/jina-reranker-v2-base-multilingual"
     top_n: int = 6
