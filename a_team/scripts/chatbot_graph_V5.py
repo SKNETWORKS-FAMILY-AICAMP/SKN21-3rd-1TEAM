@@ -1,8 +1,10 @@
 ################################################
 # A-TEAM 법률 RAG 챗봇 (LangGraph V5)
-# - 검색 다중 쿼리 + rerank + 노동법 비법령 문서 가중치
-# - 근거 스니펫을 정돈된 bullet로 전달해 인용 강제
-# - Top-K 소폭 상향, 컨텍스트 길이 제한
+# - 벡터 검색 + BM25 하이브리드 검색
+# - Jina Reranker 기반 문서 리랭킹
+# - 판례 웹 검색 통합 (Tavily)
+# - 답변 분석 과정 삭제
+# - 답변 생성 노드 프롬프트 개선
 ################################################
 
 import os
@@ -14,6 +16,7 @@ from dotenv import load_dotenv
 
 from qdrant_client import QdrantClient
 from langchain_qdrant import QdrantVectorStore
+from a_team.scripts.bm25_search import BM25KeywordRetriever
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
@@ -34,11 +37,8 @@ load_dotenv(dotenv_path=_DOTENV_PATH)
 class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
     user_query: str
-    query_analysis: Optional[dict]
     retrieved_docs: Optional[List[Document]]
-    case_law_results: Optional[List[dict]]
     generated_answer: Optional[str]
-    next_action: Optional[str]
 
 
 class JinaReranker(BaseDocumentCompressor):
@@ -80,65 +80,9 @@ class JinaReranker(BaseDocumentCompressor):
         return final_docs
 
 
-class QueryAnalysis(BaseModel):
-    category: str = Field(description="법률 분야: 노동법, 형사법, 민사법, 기타 중 하나")
-    needs_clarification: bool = Field(default=False, description="질문이 극도로 모호하여 답변 불가능한지")
-    needs_case_law: bool = Field(default=False, description="대법원 판례 검색이 필요한지")
-    clarification_question: str = Field(default="", description="명확화 필요 시 사용자에게 물어볼 질문")
-
-
-def create_analyze_query_node(llm: ChatOpenAI):
-    structured_llm = llm.with_structured_output(QueryAnalysis)
-    analyze_prompt = ChatPromptTemplate.from_messages([
-        (
-            "system",
-            """당신은 법률 질문을 분석하는 전문가입니다.
-
-1. category: 질문의 법률 분야
-   - "노동법": 근로기준법, 임금, 퇴직금, 해고, 산재, 주휴수당 등
-   - "형사법": 범죄, 형벌, 수사, 재판, 고소/고발 등
-   - "민사법": 계약, 손해배상, 소유권, 채권 등
-   - "기타": 위 카테고리에 속하지 않는 법률 질문
-
-2. needs_clarification: 질문이 극도로 모호하여 어떤 답변도 불가능한지 (true/false)
-3. needs_case_law: 대법원 판례가 필요한지 (true/false)
-4. clarification_question: needs_clarification이 true일 때만 작성""",
-        ),
-        ("human", "{query}"),
-    ])
-
-    def analyze_query(state: AgentState) -> AgentState:
-        query = state["user_query"]
-        print("🔎 [질문 분석 중...]")
-        chain = analyze_prompt | structured_llm
-        analysis: QueryAnalysis = chain.invoke({"query": query})
-        print(f"📋 [분석 결과] 분야: {analysis.category} / 판례 필요: {'예' if analysis.needs_case_law else '아니오'}")
-        return {"query_analysis": analysis.model_dump()}
-
-    return analyze_query
-
-
-def create_clarify_node(llm: ChatOpenAI):
-    def request_clarification(state: AgentState) -> AgentState:
-        analysis = state.get("query_analysis", {})
-        clarification_q = analysis.get("clarification_question", "") or "질문을 좀 더 구체적으로 알려주세요. 상황, 상대방, 쟁점, 원하는 결과를 적어주시면 더 정확히 답변드릴 수 있습니다."
-        print("❓ [명확화 요청]")
-        answer = f"""안녕하세요! 질문을 더 이해하기 위해 몇 가지를 확인하고 싶어요.
-
-{clarification_q}
-
-위 내용을 포함해 다시 알려주시면 더 정확히 도움 드릴 수 있습니다. 😊"""
-        return {"generated_answer": answer, "next_action": "end"}
-
-    return request_clarification
-
-
 # ----------------------------
 # 검색 관련 헬퍼
 # ----------------------------
-NON_STATUTE_SOURCES = {"interpretation", "case_law", "moel_qa", "판정선례"}
-
-
 def expand_queries(query: str) -> List[str]:
     variants = {query.strip()}
     # 조사/불용어 일부 제거 시도
@@ -160,13 +104,6 @@ def dedup_documents(docs: List[Document]) -> List[Document]:
         seen.add(key)
         unique.append(doc)
     return unique
-
-
-def boost_non_statute_score(doc: Document, boost: float = 0.15) -> float:
-    score = doc.metadata.get("relevance_score", 0.0)
-    if str(doc.metadata.get("source", "")) in NON_STATUTE_SOURCES:
-        score += boost
-    return score
 
 
 def format_context_snippets(docs: List[Document], max_docs: int = 5, max_chars: int = 500) -> str:
@@ -192,34 +129,78 @@ def format_context_snippets(docs: List[Document], max_docs: int = 5, max_chars: 
 
 
 def create_search_node(vectorstore: QdrantVectorStore):
+    # BM25 인덱스 경로는 환경변수 또는 고정값 사용
+    BM25_INDEX_DIR = os.getenv("BM25_INDEX_DIR", "whoosh_index")
+    try:
+        bm25_retriever = BM25KeywordRetriever(index_dir=BM25_INDEX_DIR)
+        print(f"✅ BM25/keyword 인덱스 로드 완료: {BM25_INDEX_DIR}")
+    except Exception as e:
+        print(f"⚠️  BM25 인덱스 로드 실패: {e}")
+        bm25_retriever = None
+
+
     def search_documents(state: AgentState) -> AgentState:
         query = state["user_query"]
         print(f"🔍 [법령 검색] 쿼리: {query[:50]}...")
 
         variants = expand_queries(query)
         all_docs: List[Document] = []
+        vector_scores = []
+        # 1. 벡터 검색 (cosine similarity)
         for q in variants:
             try:
-                res = vectorstore.similarity_search_with_score(q, k=12)
+                res = vectorstore.similarity_search_with_score(q, k=10)
                 all_docs.extend([doc for doc, score in res])
+                vector_scores.extend([score for doc, score in res])
             except Exception as e:
-                print(f"⚠️  [검색 오류] {e}")
+                print(f"⚠️  [벡터 검색 오류] {e}")
+
+        # 벡터 검색 결과가 있고, 모든 score가 0.5 이하라면 쿼리 변형 후 재검색 시도
+        if vector_scores and all(s <= 0.5 for s in vector_scores):
+            print("⚠️  [벡터 유사도 0.5 이하, 쿼리 변형 후 재검색]")
+            # 쿼리에서 불용어 제거, 괄호/특수문자 제거 등 추가 변형 가능
+            # 이미 expand_queries에서 일부 변형을 했으므로, 여기서는 원 쿼리의 단어만 추출해 재검색 예시
+            import re
+            keywords = re.findall(r"[\w가-힣]+", query)
+            simple_query = " ".join(keywords)
+            retry_variants = expand_queries(simple_query)
+            all_docs = []
+            vector_scores = []
+            for q in retry_variants:
+                try:
+                    res = vectorstore.similarity_search_with_score(q, k=10)
+                    all_docs.extend([doc for doc, score in res])
+                    vector_scores.extend([score for doc, score in res])
+                except Exception as e:
+                    print(f"⚠️  [벡터 재검색 오류] {e}")
+            # BM25도 재검색
+            if bm25_retriever:
+                for q in retry_variants:
+                    try:
+                        bm25_docs = bm25_retriever.search(q, k=5)
+                        all_docs.extend(bm25_docs)
+                    except Exception as e:
+                        print(f"⚠️  [BM25 재검색 오류] {e}")
+        else:
+            # 2. BM25/keyword 검색 (하이브리드)
+            if bm25_retriever:
+                for q in variants:
+                    try:
+                        bm25_docs = bm25_retriever.search(q, k=5)
+                        all_docs.extend(bm25_docs)
+                    except Exception as e:
+                        print(f"⚠️  [BM25 검색 오류] {e}")
 
         all_docs = dedup_documents(all_docs)
         if not all_docs:
             print("⚠️  [검색 결과 없음]")
             return {"retrieved_docs": []}
 
+
         try:
             reranker = JinaReranker(top_n=6)
             reranked = reranker.compress_documents(all_docs, query)
             if reranked:
-                # 노동법 비법령 문서 가중치 부여 후 재정렬
-                reranked = sorted(
-                    reranked,
-                    key=lambda d: boost_non_statute_score(d),
-                    reverse=True,
-                )
                 docs = reranked[:6]
                 print(f"✅ [리랭킹 완료] {len(docs)}개 문서 선별")
             else:
@@ -237,102 +218,66 @@ def create_search_node(vectorstore: QdrantVectorStore):
     return search_documents
 
 
-def create_case_law_search_node(llm: ChatOpenAI):
-    def search_case_law(state: AgentState) -> AgentState:
-        query = state["user_query"]
-        analysis = state.get("query_analysis", {})
-        category = analysis.get("category", "기타")
-
-        print("⚖️  [판례 검색] 대법원 판례 웹 검색 중...")
-        tavily_api_key = os.getenv("TAVILY_API_KEY")
-        if not tavily_api_key:
-            print("⚠️  [판례 검색 스킵] TAVILY_API_KEY 미설정")
-            return {"case_law_results": []}
-
-        try:
-            search_tool = TavilySearchResults(
-                max_results=3,
-                search_depth="advanced",
-                include_answer=True,
-                include_raw_content=False,
-            )
-            search_query = f"대법원 판례 {category} {query}"
-            results = search_tool.invoke({"query": search_query})
-            case_laws = []
-            for r in results:
-                case_laws.append(
-                    {
-                        "title": r.get("title", ""),
-                        "url": r.get("url", ""),
-                        "content": r.get("content", "")[:400],
-                    }
-                )
-            print(f"✅ [판례 검색 완료] {len(case_laws)}건")
-            return {"case_law_results": case_laws}
-        except Exception as e:
-            print(f"⚠️  [판례 검색 오류] {e}")
-            return {"case_law_results": []}
-
-    return search_case_law
-
-
-def create_generate_node(llm: ChatOpenAI):
+def create_generate_node(llm):
     answer_prompt = ChatPromptTemplate.from_messages([
         (
             "system",
-            """당신은 법률 전문 AI 'A-TEAM 봇'입니다.
-- 검색된 근거를 인용하여 답변합니다.
-- 답변 구조: 📌 결론 → 📖 법적 근거 → 💡 추가 설명
-- 근거마다 [법령명 제N조], [판례: 제목] 형태로 표기하고, 존재하는 근거만 사용합니다.
-- 불확실하면 추측하지 말고 한계를 명시합니다.
-- 한국어로 간결하게 답변합니다.""",
-        ),
-        (
-            "human",
-            """질문 분야: {category}
-사용자 질문: {query}
+            """당신은 대한민국 노동 분야 법률, 형사법 법률, 민사법 법률에 대해 전문적으로 학습된 AI 도우미입니다.
+        사용자의 질문에 대해 저장된 법률 조항 데이터와 관련 정보(판례, 행정해석 등)를 기반으로 정확하고 신뢰성 있는 답변을 제공하세요.
+1. 답변 작성 기본 지침 
+    - 법률 조항에 관한 질문이라면 그 조항에 관한 전체 내용을 가져온다.
+    - 예를들어 '근로기준법 제1조의 내용'이라는 질문을 받으면 근로기준법 제1조의 조항을 전부 다 답변한다.
+    - 질문 유형에 따라 관련 정보를 구조적으로 작성하며, 중요 세법 조문과 요약된 내용을 포함합니다.
+    - 비전문가도 이해할 수 있도록 용어를 친절히 설명합니다.
 
-📚 근거 스니펫:
-{context}
+2. 답변 작성 세부 지침:
+    - **간결성**: 답변은 간단하고 명확하게 작성하되, 법 조항에 관한 질문일 경우 관련 법 조문의 전문을 명시합니다.
+    - **구조화된 정보 제공**:
+        - 세법 조항 번호, 세법 조항의 정의, 시행령, 관련 규정을 구체적으로 명시합니다.
+        - 복잡한 개념은 예시를 들어 설명하거나, 단계적으로 안내합니다.
+    - **신뢰성 강조**:
+        - 답변이 법적 조언이 아니라 정보 제공 목적임을 명확히 알립니다.
+        - "이 답변은 세법 관련 정보를 바탕으로 작성되었으며, 구체적인 상황에 따라 전문가의 추가 조언이 필요할 수 있습니다."를 추가합니다.
+    - **정확성**:
+        - 법령 및 법률에 관한질문은 추가적인 내용없이 한가지 content에 집중하여 답변한다.
+        - 조항에 대한 질문은 시행령이나 시행규칙보단 해당법에서 가져오는것에 집중한다.
 
-⚖️ 관련 판례:
-{case_law}
+3. 추가적인 사용자 지원:
+    - 답변 후 사용자에게 주제와 관련된 후속 질문 두 가지를 제안합니다.
+    - 후속 질문은 사용자가 더 깊이 탐구할 수 있도록 설계하며, 각 질문 앞뒤에 한 줄씩 띄어쓰기를 합니다.
 
-위 근거를 인용해 답변하세요. 각 단락에 근거를 붙이고, 근거가 없으면 모른다고 말하세요.""",
+4. 예외 상황 처리:
+    - 사용자가 질문을 모호하게 작성한 경우:
+        - "질문이 명확하지 않습니다. 구체적으로 어떤 부분을 알고 싶으신지 말씀해 주시겠어요?"와 같은 문구로 추가 정보를 요청합니다.
+    - 질문이 알고 있는 법률(노동 분야 법률, 형사법, 민사법)과 직접 관련이 없는 경우:
+        - "이 질문은 제가 학습한 법률 범위를 벗어납니다."라고 알리고, 알고 있는 법률(노동 분야 법률, 형사법, 민사법)과 관련된 새로운 질문을 유도합니다.
+
+5. 추가 지침:
+    - 개행문자 두 개 이상은 절대 사용하지 마세요.
+    - 질문 및 답변에서 사용된 세법 조문은 최신 데이터에 기반해야 합니다.
+    - 질문이 복합적인 경우, 각 하위 질문에 대해 별도로 답변하거나, 사용자에게 우선순위를 확인합니다.
+
+6. 예시 답변 템플릿:
+    - "질문에 대한 답변: ..."
+    - "관련 세법 조항: ..."
+    - "추가 설명: ..."
+    - 위는 "예시" 템플릿으로, 예정 답변이 템플릿과 일치하지 않을 경우 수정 가능합니다."""
         ),
     ])
 
     def generate_answer(state: AgentState) -> AgentState:
         query = state["user_query"]
-        analysis = state.get("query_analysis", {})
-        category = analysis.get("category", "기타")
         docs = state.get("retrieved_docs", []) or []
-        case_laws = state.get("case_law_results", []) or []
 
         print("💬 [답변 생성 중...]")
 
         context = format_context_snippets(docs, max_docs=5, max_chars=500)
 
-        if case_laws:
-            case_parts = []
-            for i, case in enumerate(case_laws, 1):
-                case_parts.append(f"[판례 {i}] {case.get('title','')}: {case.get('content','')}")
-            case_law_context = "\n".join(case_parts)
-        else:
-            case_law_context = "(관련 판례 정보 없음)"
-
-        if not docs and not case_laws:
-            answer = """죄송합니다. 관련 근거를 찾지 못했습니다. 질문을 더 구체적으로 작성하거나 다른 키워드로 다시 시도해 주세요. 복잡한 사안이면 전문 법률 상담을 권장드립니다."""
+        if not docs:
+            answer = "죄송합니다. 관련 근거를 찾지 못했습니다. 질문을 더 구체적으로 작성하거나 다른 키워드로 다시 시도해 주세요. 복잡한 사안이면 전문 법률 상담을 권장드립니다."
         else:
             chain = answer_prompt | llm
-            response = chain.invoke(
-                {
-                    "category": category,
-                    "query": query,
-                    "context": context,
-                    "case_law": case_law_context,
-                }
-            )
+            response = chain.invoke({"query": query, "context": context})
             answer = response.content
 
         print("✅ [답변 생성 완료]")
@@ -341,17 +286,7 @@ def create_generate_node(llm: ChatOpenAI):
     return generate_answer
 
 
-def route_after_analysis(state: AgentState) -> Literal["clarify", "search"]:
-    analysis = state.get("query_analysis", {})
-    if analysis.get("needs_clarification", False):
-        return "clarify"
-    return "search"
-
-
-def route_after_search(state: AgentState) -> Literal["case_law_search", "generate"]:
-    analysis = state.get("query_analysis", {})
-    if analysis.get("needs_case_law", False):
-        return "case_law_search"
+def route_after_search(state: AgentState) -> Literal["generate"]:
     return "generate"
 
 
@@ -361,7 +296,6 @@ def initialize_resources():
     QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
     if not QDRANT_API_KEY:
         raise ValueError("QDRANT_API_KEY가 .env 파일에 설정되지 않았습니다!")
-
     print("🔧 설정 로드 완료")
     print("\n🚀 임베딩 모델 로드 중 (Qwen/Qwen3-Embedding-0.6B)...")
     embeddings = HuggingFaceEmbeddings(
@@ -392,29 +326,20 @@ def initialize_langgraph_chatbot():
     vectorstore = resources["vectorstore"]
 
     print("\n🤖 LLM 설정 중...")
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, streaming=True)
+    llm = ChatOpenAI(model="gpt-4.1", temperature=0, streaming=True)
     print("✅ LLM 설정 완료")
 
     print("\n⚙️  LangGraph 노드 생성 중...")
-    analyze_node = create_analyze_query_node(llm)
-    clarify_node = create_clarify_node(llm)
     search_node = create_search_node(vectorstore)
-    case_law_node = create_case_law_search_node(llm)
     generate_node = create_generate_node(llm)
     print("✅ 노드 생성 완료")
 
     workflow = StateGraph(AgentState)
-    workflow.add_node("analyze", analyze_node)
-    workflow.add_node("clarify", clarify_node)
     workflow.add_node("search", search_node)
-    workflow.add_node("case_law_search", case_law_node)
     workflow.add_node("generate", generate_node)
 
-    workflow.set_entry_point("analyze")
-    workflow.add_conditional_edges("analyze", route_after_analysis, {"clarify": "clarify", "search": "search"})
-    workflow.add_edge("clarify", END)
-    workflow.add_conditional_edges("search", route_after_search, {"case_law_search": "case_law_search", "generate": "generate"})
-    workflow.add_edge("case_law_search", "generate")
+    workflow.set_entry_point("search")
+    workflow.add_edge("search", "generate")
     workflow.add_edge("generate", END)
 
     graph = workflow.compile()
@@ -439,7 +364,7 @@ def main():
         print("\n" + "=" * 60)
         print("✅ 🤖 A-TEAM 법률 챗봇 준비 완료 (V5)")
         print("=" * 60)
-        print("\n사용 방법: 노동법/형사법/민사법 질문에 답변, 판례 필요 시 웹 검색, 모호하면 명확화 요청")
+        print("\n사용 방법: 노동법/형사법/민사법 질문에 답변, 모호하면 명확화 요청")
         print("'exit', 'quit', '종료'로 종료합니다.\n")
 
         while True:
@@ -455,11 +380,8 @@ def main():
                 initial_state = {
                     "messages": [HumanMessage(content=user_input)],
                     "user_query": user_input,
-                    "query_analysis": None,
                     "retrieved_docs": None,
-                    "case_law_results": None,
                     "generated_answer": None,
-                    "next_action": None,
                 }
 
                 print("\n" + "-" * 60)
