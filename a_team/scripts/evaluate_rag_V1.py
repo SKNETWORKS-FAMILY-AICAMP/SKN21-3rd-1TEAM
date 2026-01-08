@@ -129,11 +129,11 @@ def run_inference(questions: List[str], chatbot_version: str = "v3", verbose: bo
     print(f"\n🤖 LangGraph 모델 초기화 중... (버전: {chatbot_version})")
 
     if chatbot_version.lower() == "v1":
-        from chatbot_V1 import initialize_langgraph_chatbot
+        from a_team.scripts.chatbot_graph_V1 import initialize_langgraph_chatbot
     elif chatbot_version.lower() == "v2":
-        from chatbot_V2 import initialize_langgraph_chatbot
+        from a_team.scripts.chatbot_graph_V2 import initialize_langgraph_chatbot
     elif chatbot_version.lower() == "v3":
-        from chatbot_V3 import initialize_langgraph_chatbot
+        from a_team.scripts.chatbot_graph_V3 import initialize_langgraph_chatbot
     else:
         raise ValueError(f"지원하지 않는 챗봇 버전입니다: {chatbot_version}")
 
