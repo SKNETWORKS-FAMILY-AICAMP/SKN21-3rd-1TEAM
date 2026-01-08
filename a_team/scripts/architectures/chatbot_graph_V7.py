@@ -28,10 +28,6 @@ from pathlib import Path
 import warnings
 import os
 
-# Qdrant & LangChain 관련 임포트
-
-# LangGraph 관련 임포트
-
 # 환경 변수 로드: 실행 위치(CWD)와 무관하게 이 파일과 같은 폴더의 .env를 사용
 _DOTENV_PATH = Path(__file__).with_name(".env")
 load_dotenv(dotenv_path=_DOTENV_PATH)
