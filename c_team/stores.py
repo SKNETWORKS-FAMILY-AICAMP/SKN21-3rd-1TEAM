@@ -6,14 +6,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
+QDRANT_URL = "http://localhost:6333"
 COLLECTION_NAME = "criminal"
 QDRANT_API_KEY = os.getenv("QDRANT__SERVICE__API_KEY")
 
 
 def get_embeddings():
     return OpenAIEmbeddings(
-        model="text-embedding-3-small",
+        model="text-embedding-3-large",
         api_key=os.getenv("OPENAI_API_KEY"),
         request_timeout=500,
         max_retries=3,
