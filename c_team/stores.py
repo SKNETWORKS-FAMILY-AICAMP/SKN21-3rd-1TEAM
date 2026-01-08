@@ -8,6 +8,7 @@ load_dotenv()
 
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 COLLECTION_NAME = "criminal"
+QDRANT_API_KEY = os.getenv("QDRANT__SERVICE__API_KEY")
 
 
 def get_embeddings():
@@ -15,12 +16,18 @@ def get_embeddings():
 
 
 def get_client():
-    return QdrantClient(url=QDRANT_URL)
+    return QdrantClient(
+        url=QDRANT_URL,
+        api_key=QDRANT_API_KEY,
+    )
 
 
 def get_vector_store():
     return QdrantVectorStore.from_existing_collection(
-        embedding=get_embeddings(), collection_name=COLLECTION_NAME, url=QDRANT_URL
+        embedding=get_embeddings(),
+        collection_name=COLLECTION_NAME,
+        url=QDRANT_URL,
+        api_key=QDRANT_API_KEY,
     )
 
 
@@ -34,5 +41,6 @@ def init_vector_store(documents):
         get_embeddings(),
         url=QDRANT_URL,
         collection_name=COLLECTION_NAME,
+        api_key=QDRANT_API_KEY,
         force_recreate=True,
     )

@@ -1,5 +1,5 @@
 """
-법령 외 데이터(판례, 행정해석) 전처리 및 Qdrant 업로드 스크립트
+법령 외 데이터(주요판정사례, 행정해석) 전처리 및 Qdrant 업로드 스크립트
 """
 import json
 import re
@@ -25,15 +25,15 @@ def clean_text(text: str) -> str:
 
 def load_case_law_data(file_path: Path) -> Tuple[List[str], List[Dict]]:
     """
-    주요판례 데이터 로드 및 전처리
+    주요판정사례 데이터 로드 및 전처리
 
     Args:
-        file_path: rd_주요판례.json 파일 경로
+        file_path: rd_주요판정사례.json 파일 경로
 
     Returns:
         (documents, metadatas) 튜플
     """
-    print(f"\n📂 판례 데이터 로드 중: {file_path.name}")
+    print(f"\n📂 주요판정사례 데이터 로드 중: {file_path.name}")
 
     with open(file_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
@@ -41,7 +41,7 @@ def load_case_law_data(file_path: Path) -> Tuple[List[str], List[Dict]]:
     documents = []
     metadatas = []
 
-    for item in tqdm(data, desc="판례 전처리"):
+    for item in tqdm(data, desc="주요판정사례 전처리"):
         제목 = item.get('제목', '').strip()
         판정사항 = clean_text(item.get('판정사항', ''))
         판정요지 = clean_text(item.get('판정요지', ''))
@@ -50,8 +50,8 @@ def load_case_law_data(file_path: Path) -> Tuple[List[str], List[Dict]]:
         if not (판정사항 or 판정요지):
             continue
 
-        # 텍스트 구성: [판례: 제목]\n판정사항\n판정요지
-        text_parts = [f"[판례: {제목}]"]
+        # 텍스트 구성: [주요판정사례: 제목]\n판정사항\n판정요지
+        text_parts = [f"[주요판정사례: {제목}]"]
 
         if 판정사항:
             text_parts.append(f"판정사항: {판정사항}")
@@ -73,7 +73,7 @@ def load_case_law_data(file_path: Path) -> Tuple[List[str], List[Dict]]:
             'doc_length': len(text)
         })
 
-    print(f"✅ 판례 {len(documents)}개 문서 전처리 완료")
+    print(f"✅ 주요판정사례 {len(documents)}개 문서 전처리 완료")
     return documents, metadatas
 
 
@@ -136,6 +136,85 @@ def load_interpretation_data(file_path: Path) -> Tuple[List[str], List[Dict]]:
     return documents, metadatas
 
 
+def load_precedent_data(file_path: Path) -> Tuple[List[str], List[Dict]]:
+    """
+    판정선례(질의회답) 데이터 로드 및 전처리
+    전략: 1 판정선례 = 1 문서 (질문+답변 통합)
+
+    Args:
+        file_path: rd_법령외_판정선례.json 파일 경로
+
+    Returns:
+        (documents, metadatas) 튜플
+    """
+    print(f"\n📂 판정선례 데이터 로드 중: {file_path.name}")
+
+    with open(file_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+
+    documents = []
+    metadatas = []
+
+    for item in tqdm(data, desc="판정선례 전처리"):
+        # 필수 필드 체크
+        if not item.get('question') or not item.get('answer'):
+            continue
+
+        item_id = item.get('item_id', '')
+        title = clean_text(item.get('title', ''))
+        agency = item.get('agency', '').strip()
+        date = item.get('date', '').strip()
+        question = clean_text(item.get('question', ''))
+        answer = clean_text(item.get('answer', ''))
+        url = item.get('url', '')
+
+        # 관련 법령 처리
+        related_laws = item.get('related_laws', [])
+        law_texts = [l.get('text', '').strip()
+                     for l in related_laws if l.get('text')]
+        law_section = "\n".join(f"- {l}" for l in law_texts)
+
+        # 텍스트 구성
+        # [판정선례] 제목
+        # [질의] ...
+        # [회신] ...
+        # [관련 법령] ...
+        text_parts = [
+            f"[판정선례] {title}",
+            "",
+            "[질의]",
+            question,
+            "",
+            "[회신]",
+            answer
+        ]
+
+        if law_section:
+            text_parts.extend([
+                "",
+                "[관련 법령]",
+                law_section
+            ])
+
+        text = "\n".join(text_parts)
+
+        # 메타데이터 구성
+        documents.append(text)
+        metadatas.append({
+            'source': '판정선례',
+            'title': title,
+            'agency': agency,
+            'date': date,
+            'item_id': item_id,
+            'related_laws': ", ".join(law_texts),  # 검색 필터링용 문자열
+            'url': url,
+            'doc_length': len(text)
+        })
+
+    print(f"✅ 판정선례 {len(documents)}개 문서 전처리 완료")
+    return documents, metadatas
+
+
 def load_moel_qa_data(file_path: Path) -> Tuple[List[str], List[Dict]]:
     """
     고용노동부 Q&A 데이터 로드 및 전처리
@@ -181,51 +260,6 @@ def load_moel_qa_data(file_path: Path) -> Tuple[List[str], List[Dict]]:
     return documents, metadatas
 
 
-def load_qa_response_data(file_path: Path) -> Tuple[List[str], List[Dict]]:
-    """
-    중앙부처 1차 해석 (질의회답) 데이터 로드 및 전처리
-
-    Args:
-        file_path: rd_법령외_질의회답.json 파일 경로
-
-    Returns:
-        (documents, metadatas) 튜플
-    """
-    print(f"\n📂 중앙부처 1차 해석 데이터 로드 중: {file_path.name}")
-
-    with open(file_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-
-    documents = []
-    metadatas = []
-
-    for item in tqdm(data, desc="질의회답 전처리"):
-        title = item.get('title', '').strip()
-        question = clean_text(item.get('question', ''))
-        answer = clean_text(item.get('answer', ''))
-
-        # 질의와 답변은 필수
-        if not (question or answer):
-            continue
-
-        # 텍스트 구성
-        text = f"[질의회답] {title}\n\n질의:\n{question}\n\n답변:\n{answer}"
-
-        # 문서 및 메타데이터 추가
-        documents.append(text)
-        metadatas.append({
-            'source': 'qa_response',
-            'title': title,
-            'agency': item.get('agency', ''),
-            'date': item.get('date', ''),
-            'url': item.get('url', ''),
-            'doc_length': len(text)
-        })
-
-    print(f"✅ 중앙부처 1차 해석 {len(documents)}개 문서 전처리 완료")
-    return documents, metadatas
-
-
 def save_preprocessed_data(documents: List[str], metadatas: List[Dict], output_path: Path):
     """
     전처리된 데이터를 JSON 파일로 저장
@@ -254,7 +288,7 @@ def main():
     """메인 실행 함수"""
 
     print("\n" + "="*60)
-    print("📝 판례·행정해석 데이터 전처리")
+    print("📝 주요판정사례·행정해석 데이터 전처리")
     print("="*60)
 
     # 경로 설정
@@ -267,57 +301,48 @@ def main():
     processed_dir.mkdir(exist_ok=True, parents=True)
 
     # 입력 파일
-    case_law_file = raw_dir / "rd_법령외_주요판례.json"
+    case_law_file = raw_dir / "rd_법령외_주요판정사례.json"
     interpretation_file = raw_dir / "rd_법령외_행정해석.json"
     moel_qa_file = raw_dir / "rd_법령외_고용노동부QA.json"
+    precedent_file = raw_dir / "rd_법령외_판정선례.json"
 
     # 출력 파일
-    case_law_output = processed_dir / "fd_법령외_판례.json"
+    case_law_output = processed_dir / "fd_법령외_주요판정사례.json"
     interpretation_output = processed_dir / "fd_법령외_행정해석.json"
     moel_qa_output = processed_dir / "fd_법령외_고용노동부QA.json"
-
-    # 파일 존재 확인
-    if not case_law_file.exists():
-        print(f"❌ 파일 없음: {case_law_file}")
-        return
-
-    if not interpretation_file.exists():
-        print(f"❌ 파일 없음: {interpretation_file}")
-        return
-
-    if not moel_qa_file.exists():
-        print(f"❌ 파일 없음: {moel_qa_file}")
-        return
+    precedent_output = processed_dir / "fd_법령외_판정선례.json"
 
     # 데이터 로드 및 전처리
-    # 1. 판례 데이터
-    case_docs, case_metas = load_case_law_data(case_law_file)
+    # 1. 주요판정사례 데이터
+    if case_law_file.exists():
+        case_docs, case_metas = load_case_law_data(case_law_file)
+        save_preprocessed_data(case_docs, case_metas, case_law_output)
+    else:
+        print(f"⚠️ 파일 없음: {case_law_file} (건너뜀)")
 
     # 2. 행정해석 데이터
-    interp_docs, interp_metas = load_interpretation_data(interpretation_file)
+    if interpretation_file.exists():
+        interp_docs, interp_metas = load_interpretation_data(
+            interpretation_file)
+        save_preprocessed_data(interp_docs, interp_metas,
+                               interpretation_output)
+    else:
+        print(f"⚠️ 파일 없음: {interpretation_file} (건너뜀)")
 
     # 3. 고용노동부 Q&A 데이터
-    moel_qa_docs, moel_qa_metas = load_moel_qa_data(moel_qa_file)
+    if moel_qa_file.exists():
+        moel_qa_docs, moel_qa_metas = load_moel_qa_data(moel_qa_file)
+        save_preprocessed_data(moel_qa_docs, moel_qa_metas, moel_qa_output)
+    else:
+        print(f"⚠️ 파일 없음: {moel_qa_file} (건너뜀)")
 
     # 4. 중앙부처 1차 해석 (판정선례) 데이터
-    qa_response_file = raw_dir / "rd_법령외_판정선례.json"
-    qa_response_output = processed_dir / "fd_법령외_판정선례.json"
-
-    if qa_response_file.exists():
-        qa_resp_docs, qa_resp_metas = load_qa_response_data(qa_response_file)
-        save_preprocessed_data(qa_resp_docs, qa_resp_metas, qa_response_output)
-        print(f"  - {qa_response_output}")
+    if precedent_file.exists():
+        precedent_docs, precedent_metas = load_precedent_data(precedent_file)
+        save_preprocessed_data(
+            precedent_docs, precedent_metas, precedent_output)
     else:
-        print(f"⚠️ 파일 없음: {qa_response_file} (건너뜀)")
-
-    # 전처리 데이터 저장 (판례)
-    save_preprocessed_data(case_docs, case_metas, case_law_output)
-
-    # 전처리 데이터 저장 (행정해석)
-    save_preprocessed_data(interp_docs, interp_metas, interpretation_output)
-
-    # 전처리 데이터 저장 (고용노동부 Q&A)
-    save_preprocessed_data(moel_qa_docs, moel_qa_metas, moel_qa_output)
+        print(f"⚠️ 파일 없음: {precedent_file} (건너뜀)")
 
     print("\n" + "="*60)
     print("✅ 전처리 완료!")
@@ -328,7 +353,7 @@ def main():
     print("="*60 + "\n")
 
     # 샘플 출력
-    print("📄 샘플 문서 (판례):")
+    print("📄 샘플 문서 (주요판정사례):")
     print("-"*60)
     print(case_docs[0][:500] + "..." if len(case_docs[0])
           > 500 else case_docs[0])

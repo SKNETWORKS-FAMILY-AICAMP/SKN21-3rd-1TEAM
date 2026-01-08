@@ -1,5 +1,5 @@
 """
-주요판례, 행정해석 데이터를 Qdrant 벡터 DB에 저장하는 스크립트
+주요판정사례, 행정해석 데이터를 Qdrant 벡터 DB에 저장하는 스크립트
 """
 
 from sentence_transformers import SentenceTransformer
@@ -234,7 +234,7 @@ def load_json(filepath: str) -> Any:
 
 def main():
     print("=" * 60)
-    print("판례/행정해석 Qdrant 벡터 DB 구축")
+    print("주요판정사례/행정해석 Qdrant 벡터 DB 구축")
     print("=" * 60)
 
     # Qdrant Cloud 연결
@@ -256,13 +256,13 @@ def main():
     # 모든 데이터 수집
     all_chunks = []
 
-    # 1. 판례 데이터 로드
-    case_law_file = os.path.join(PROCESSED_DIR, "fd_법령외_판례.json")
+    # 1. 주요판정사례 데이터 로드
+    case_law_file = os.path.join(PROCESSED_DIR, "fd_법령외_주요판정사례.json")
     if os.path.exists(case_law_file):
-        print(f"\n=== 판례 데이터 로드 중 ===")
+        print(f"\n=== 주요판정사례 데이터 로드 중 ===")
         data = load_json(case_law_file)
         all_chunks.extend(data)
-        print(f"판례 {len(data)}개 문서 로드 완료")
+        print(f"주요판정사례 {len(data)}개 문서 로드 완료")
     else:
         print(f"파일 없음: {case_law_file}")
 

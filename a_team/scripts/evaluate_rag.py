@@ -118,7 +118,7 @@ def run_inference(questions: List[str], verbose: bool = True) -> List[Dict[str, 
         List of {answer: str, contexts: List[str]}
     """
     # baseline.py에서 챗봇 초기화 함수 임포트
-    from a_team.scripts.chatbot_baseline import initialize_rag_chatbot
+    from chatbot_baseline import initialize_rag_chatbot
 
     print("\n🤖 Baseline 모델 초기화 중...")
     chatbot = initialize_rag_chatbot()
@@ -128,8 +128,11 @@ def run_inference(questions: List[str], verbose: bool = True) -> List[Dict[str, 
 
     iterator = tqdm(questions, desc="추론 중") if verbose else questions
 
-    for question in iterator:
+    for i, question in enumerate(iterator):
         try:
+            if verbose:
+                print(f"\n🔍 질문 [{i+1}]: {question}")
+
             # Agent 실행 (intermediate_steps로 검색 결과 추출)
             response = chatbot.invoke({
                 "input": question,
@@ -242,25 +245,52 @@ def save_results(
 ):
     """
     평가 결과를 JSON 파일로 저장합니다.
+    구조: { "summary": {metrics...}, "results": [records...] }
 
     Args:
         df: 원본 데이터프레임 (질문, 정답 포함)
         ragas_result: Ragas 평가 결과
         output_path: 출력 파일 경로
     """
+    import json
+
     # Ragas 결과를 DataFrame으로 변환
     result_df = ragas_result.to_pandas()
 
+    # 중복 컬럼 제거 (원본 df에 이미 있는 컬럼은 result_df에서 제외)
+    cols_to_use = result_df.columns.difference(df.columns)
+
     # 원본 데이터와 결합
     final_df = pd.concat(
-        [df.reset_index(drop=True), result_df.reset_index(drop=True)], axis=1)
+        [df.reset_index(drop=True),
+         result_df[cols_to_use].reset_index(drop=True)],
+        axis=1
+    )
+
+    # 요약 정보 생성 (평균 점수)
+    summary = {
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "metrics": {}
+    }
+
+    numeric_cols = result_df.select_dtypes(include=['number']).columns
+    for col in numeric_cols:
+        summary["metrics"][col] = float(result_df[col].mean())
+
+    # 최종 저장 데이터 구조
+    output_data = {
+        "summary": summary,
+        "results": final_df.to_dict(orient='records')
+    }
 
     # 저장
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    final_df.to_json(output_path, orient='records',
-                     force_ascii=False, indent=2)
+
+    with open(output_path, 'w', encoding='utf-8') as f:
+        json.dump(output_data, f, ensure_ascii=False, indent=2)
 
     print(f"\n💾 결과 저장 완료: {output_path}")
+    print(f"   (상단 summary 포함)")
 
 
 # ============================================================
@@ -347,16 +377,7 @@ def main():
         llm_model=args.eval_model
     )
 
-    # 4. 결과 출력
-    print("\n" + "=" * 60)
-    print("📊 평가 결과 요약")
-    print("=" * 60)
-
-    for metric_name, score in ragas_result.items():
-        if isinstance(score, (int, float)):
-            print(f"  • {metric_name}: {score:.4f}")
-
-    # 5. 결과 저장
+    # 4. 결과 저장 (출력 전에 먼저 저장!)
     if args.output:
         output_path = args.output
     else:
@@ -364,7 +385,27 @@ def main():
         output_dir = Path(args.golden_set).parent
         output_path = output_dir / f"evaluation_results_{timestamp}.json"
 
-    save_results(df, ragas_result, str(output_path))
+    try:
+        save_results(df, ragas_result, str(output_path))
+    except Exception as e:
+        print(f"⚠️ 결과 저장 중 오류 발생: {e}")
+
+    # 5. 결과 출력 (DataFrame 사용)
+    print("\n" + "=" * 60)
+    print("📊 평가 결과 요약")
+    print("=" * 60)
+
+    try:
+        # Ragas 결과를 DataFrame으로 변환하여 평균 계산
+        result_df = ragas_result.to_pandas()
+        numeric_cols = result_df.select_dtypes(include=['number']).columns
+
+        for col in numeric_cols:
+            avg_score = result_df[col].mean()
+            print(f"  • {col}: {avg_score:.4f}")
+
+    except Exception as e:
+        print(f"⚠️ 결과 출력 중 오류 발생 (데이터는 저장됨): {e}")
 
     print("\n" + "=" * 60)
     print("✅ 평가 완료!")
