@@ -9,10 +9,12 @@
 # 작성일: 2026-01-08
 ################################################
 
+
 import os
 import sys
 import logging
 import warnings
+import asyncio
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import (
@@ -32,12 +34,11 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from langchain_huggingface import HuggingFaceEmbeddings
 
-# LangChain Retrievers
-from langchain_community.retrievers import BM25Retriever
 
-# Qdrant
+# Qdrant & FlagEmbedding (BGE-M3)
 from langchain_qdrant import QdrantVectorStore
-from qdrant_client import QdrantClient
+from qdrant_client import QdrantClient, AsyncQdrantClient, models
+from FlagEmbedding import BGEM3FlagModel
 
 # LangGraph
 from langgraph.graph.message import add_messages
@@ -62,18 +63,17 @@ class Config:
     LLM_MODEL: str = "gpt-4o-mini"
     LLM_TEMPERATURE: float = 0.0
     EMBEDDING_MODEL: str = "Qwen/Qwen3-Embedding-0.6B"
+    SPARSE_EMBEDDING_MODEL: str = "BAAI/bge-m3"  # BGE-M3 (Multilingual)
     RERANKER_MODEL: str = "jinaai/jina-reranker-v2-base-multilingual"
 
     # ═══════════════════════════════════════════════════════════
     # [2] RAG Settings - 검색 및 처리 설정
     # ═══════════════════════════════════════════════════════════
     VECTOR_DIM: int = 1024
-    TOP_K_VECTOR: int = 15                  # Vector Search k (15 -> 10)
-    TOP_K_BM25: int = 15                    # BM25 Search k (15 -> 10)
+    TOP_K_VECTOR: int = 20                  # Vector Search k
     TOP_K_RERANK: int = 5                   # Reranker 후 상위 k개
     TOP_K_FINAL: int = 5                    # 최종 답변 생성에 사용할 문서 수
     RELEVANCE_THRESHOLD: float = 0.2        # 유사도 임계값
-    BM25_SAMPLE_SIZE: int = 2000            # BM25 인덱싱용 샘플 수
     MAX_RETRY: int = 2                      # 재검색 최대 횟수
 
     # ═══════════════════════════════════════════════════════════
@@ -89,20 +89,20 @@ class Config:
     PROMPT_QUERY_EXPANSION: str = """당신은 법률 검색 쿼리 생성 전문가입니다.
 
 ## 임무
-사용자의 모호한 질문을 검색 엔진(BM25 및 Vector DB)이 이해하기 쉬운 형태로 변환하세요.
+사용자의 모호한 질문을 검색 엔진(Qdrant Hybrid Search)이 이해하기 쉬운 형태로 변환하세요.
 
 ## 전략
-1. **키워드 추출 (BM25용)**: 조사 등을 제거한 핵심 법률 명사만 추출하세요.
+1. **키워드 추출 (Sparse용)**: 조사 등을 제거한 핵심 법률 명사만 추출하세요. (키워드 매칭 중요)
    - 예: "퇴직금 못 받았어요" → "근로기준법 퇴직금 지급 청구"
-2. **의미 쿼리 (Vector용)**: 질문의 의도와 문맥을 포함한 자연어 문장을 작성하세요.
+2. **의미 쿼리 (Dense용)**: 질문의 의도와 문맥을 포함한 자연어 문장을 작성하세요.
    - 예: "퇴직금 지급 기한과 청구 방법에 대한 근로기준법 규정"
-3. **HyDE(가상 문서)**: 질문에 대한 예상 답변을 2문장으로 작성하세요. (사실 여부보다 법률 용어와 문맥이 중요)
+3. **HyDE(가상 문서)**: 질문에 대한 예상 답변을 2문장으로 작성하세요.
    - 예: "근로기준법 제36조에 따르면 퇴직금은 퇴직 후 14일 이내에 지급해야 합니다..."
 
 ## 출력 규칙
-- keyword_query: BM25 검색용 (조사 제거, 핵심 명사만, 50자 이내)
-- semantic_query: Vector 검색용 (의도 포함 자연어, 100자 이내)  
-- hyde_passage: Vector 검색용 가상 문서 (2문장, 법령명/조항 포함)"""
+- keyword_query: Sparse 검색용 (조사 제거, 핵심 명사만, 50자 이내)
+- semantic_query: Dense 검색용 (의도 포함 자연어, 100자 이내)  
+- hyde_passage: Dense 검색용 가상 문서 (2문장, 법령명/조항 포함)"""
 
     # --- [노드: Analyze] 질문 분석용 프롬프트 ---
     PROMPT_ANALYZE: str = """당신은 법률 질문을 심층 분석하는 전문가입니다.
@@ -299,13 +299,8 @@ class QueryAnalysis(BaseModel):
     needs_clarification: bool = Field(default=False, description="질문 모호 여부")
     needs_case_law: bool = Field(default=False, description="판례 검색 필요 여부")
     clarification_question: str = Field(default="", description="명확화 질문")
-    intent_type: str = Field(
-        description="질문 의도: 법령조회, 절차문의, 상황판단, 권리확인, 분쟁해결, 일반상담")
     user_situation: str = Field(default="", description="사용자 상황 요약")
     core_question: str = Field(default="", description="핵심 질문")
-    search_strategy: str = Field(description="검색 전략: 법령우선, 행정해석우선, 판례필수, 종합검색")
-    target_doc_types: List[str] = Field(
-        default_factory=list, description="검색 대상 문서 타입")
     related_laws: List[str] = Field(default_factory=list, description="관련 법률명")
 
 
@@ -323,13 +318,12 @@ class AnswerEvaluation(BaseModel):
 # [SECTION 6] Infrastructure Layer - 외부 리소스 연결
 # ============================================================
 class VectorStoreManager:
-    """Qdrant 벡터스토어 관리"""
+    """Qdrant 벡터스토어 관리 (Async Support)"""
 
     def __init__(self, config: Config):
         self.config = config
         self._load_env()
         self.embeddings = None
-        self.vectorstore = None
         self.client = None
 
     def _load_env(self):
@@ -341,8 +335,8 @@ class VectorStoreManager:
         if not self.qdrant_api_key:
             raise ValueError("QDRANT_API_KEY가 .env에 설정되지 않았습니다!")
 
-    def initialize(self) -> QdrantVectorStore:
-        """벡터스토어 초기화"""
+    def initialize(self):
+        """임베딩 및 비동기 클라이언트 초기화"""
         logger.info(f"Loading embedding model: {self.config.EMBEDDING_MODEL}")
         self.embeddings = HuggingFaceEmbeddings(
             model_name=self.config.EMBEDDING_MODEL,
@@ -351,86 +345,74 @@ class VectorStoreManager:
         )
         logger.info("Embedding model loaded")
 
-        logger.info("Connecting to Qdrant...")
+        logger.info("Connecting to Qdrant (Async)...")
         warnings.filterwarnings(
             'ignore', message='Api key is used with an insecure connection')
 
-        self.client = QdrantClient(
+        self.client = AsyncQdrantClient(
             url=self.qdrant_url,
             api_key=self.qdrant_api_key,
             timeout=self.config.QDRANT_TIMEOUT,
             prefer_grpc=False
         )
-        logger.info("Qdrant connected")
+        logger.info("Qdrant (Async) connected")
 
-        logger.info("Initializing vectorstore...")
-        self.vectorstore = QdrantVectorStore(
-            client=self.client,
-            collection_name=self.collection_name,
-            embedding=self.embeddings,
-            content_payload_key="text"
-        )
-        logger.info("Vectorstore initialized")
-
-        return self.vectorstore
-
-    def get_client(self) -> QdrantClient:
+    def get_client(self) -> AsyncQdrantClient:
         return self.client
+
+    def get_embeddings(self) -> HuggingFaceEmbeddings:
+        return self.embeddings
 
     def get_collection_name(self) -> str:
         return self.collection_name
 
 
-class BM25Manager:
-    """BM25 Retriever 관리"""
+class SparseEmbeddingManager:
+    """Sparse Embedding (BGE-M3) 관리"""
 
-    def __init__(self, config: Config, client: QdrantClient, collection_name: str):
+    def __init__(self, config: Config):
         self.config = config
-        self.client = client
-        self.collection_name = collection_name
-        self.retriever = None
+        self.model = None
 
-    def initialize(self) -> Optional[BM25Retriever]:
-        """BM25 Retriever 초기화"""
-        logger.info("Initializing BM25 Retriever...")
+    def initialize(self):
+        """BGE-M3 모델 로딩 (Sparse)"""
+        try:
+            logger.info(
+                f"Loading Sparse Model: {self.config.SPARSE_EMBEDDING_MODEL}")
+
+            # Device check (Auto)
+            use_fp16 = torch.cuda.is_available()
+            self.model = BGEM3FlagModel(
+                self.config.SPARSE_EMBEDDING_MODEL,
+                use_fp16=use_fp16
+            )
+            logger.info("Sparse Model loaded (BGE-M3)")
+        except Exception as e:
+            logger.error(f"Failed to load Sparse Model: {e}")
+            self.model = None
+
+    def encode_query(self, query: str) -> Optional[models.SparseVector]:
+        """쿼리를 Sparse Vector로 변환"""
+        if not self.model:
+            return None
 
         try:
-            collection_info = self.client.get_collection(self.collection_name)
-            total_points = collection_info.points_count
-            logger.info(f"Collection contains {total_points} documents")
-
-            sample_size = min(self.config.BM25_SAMPLE_SIZE, total_points)
-            scroll_result = self.client.scroll(
-                collection_name=self.collection_name,
-                limit=sample_size,
-                with_payload=True,
-                with_vectors=False
+            # BGE-M3 encode returns dict with 'lexical_weights'
+            output = self.model.encode(
+                query,
+                return_dense=False,
+                return_sparse=True,
+                return_colbert_vecs=False
             )
+            # Dict[str, float] where str is token_id
+            weights = output['lexical_weights']
 
-            bm25_docs = []
-            for point in scroll_result[0]:
-                payload = point.payload
-                text = payload.get("text", "")
-                if text:
-                    doc = Document(
-                        page_content=text,
-                        metadata={k: v for k, v in payload.items()
-                                  if k != "text"}
-                    )
-                    bm25_docs.append(doc)
-
-            if bm25_docs:
-                self.retriever = BM25Retriever.from_documents(
-                    bm25_docs, k=self.config.TOP_K_BM25)
-                logger.info(
-                    f"BM25 Retriever initialized ({len(bm25_docs)} docs)")
-                return self.retriever
-            else:
-                logger.warning("No documents for BM25. Vector Search only.")
-                return None
-
+            return models.SparseVector(
+                indices=list(map(int, weights.keys())),
+                values=list(map(float, weights.values()))
+            )
         except Exception as e:
-            logger.error(f"BM25 init failed: {e}")
+            logger.error(f"Sparse encoding failed: {e}")
             return None
 
 
@@ -438,29 +420,29 @@ class BM25Manager:
 # [SECTION 7] Logic Layer - LangGraph 노드 및 워크플로우 구성
 # ============================================================
 class LegalRAGBuilder:
-    """법률 RAG 그래프 빌더"""
+    """법률 RAG 그래프 빌더 (Async)"""
 
     def __init__(self, config: Config):
         self.config = config
         self.llm = None
-        self.vectorstore = None
-        self.bm25_retriever = None
+        self.embeddings = None
+        self.client = None  # AsyncQdrantClient
+        self.sparse_manager = None
         self.query_expander = None
         self.reranker = None
+        self.vs_manager = None
 
     def _init_infrastructure(self):
         """인프라 초기화"""
-        # Vector Store
-        vs_manager = VectorStoreManager(self.config)
-        self.vectorstore = vs_manager.initialize()
+        # Vector Store Manager (Async)
+        self.vs_manager = VectorStoreManager(self.config)
+        self.vs_manager.initialize()
+        self.client = self.vs_manager.get_client()
+        self.embeddings = self.vs_manager.get_embeddings()
 
-        # BM25
-        bm25_manager = BM25Manager(
-            self.config,
-            vs_manager.get_client(),
-            vs_manager.get_collection_name()
-        )
-        self.bm25_retriever = bm25_manager.initialize()
+        # Sparse Embedding Manager
+        self.sparse_manager = SparseEmbeddingManager(self.config)
+        self.sparse_manager.initialize()
 
         # LLM
         logger.info(f"Initializing LLM: {self.config.LLM_MODEL}")
@@ -488,16 +470,17 @@ class LegalRAGBuilder:
             ("human", "{query}")
         ])
 
-        def expand_query(query: str) -> HybridQuery:
+        async def expand_query(query: str) -> HybridQuery:
             try:
+                # Async invoke
                 chain = expansion_prompt | structured_llm
-                result = chain.invoke({"query": query})
+                result = await chain.ainvoke({"query": query})
                 logger.info(
-                    f"HyDE Query Generated - BM25: {result.keyword_query[:40]}...")
+                    f"HyDE Query Generated - Keyword: {result.keyword_query[:40]}...")
                 return result
             except Exception as e:
                 logger.warning(f"Query expansion failed: {e}")
-                # Fallback: 원본 쿼리 사용
+                # Fallback
                 return HybridQuery(
                     keyword_query=query,
                     semantic_query=query,
@@ -506,10 +489,10 @@ class LegalRAGBuilder:
 
         return expand_query
 
-    # --- Nodes ---
+    # --- Nodes (Async) ---
 
     def _create_analyze_node(self):
-        """[노드: Analyze] 질문 분석 노드 [사용 프롬프트: PROMPT_ANALYZE]"""
+        """[노드: Analyze] 질문 분석 노드 (Async)"""
         structured_llm = self.llm.with_structured_output(QueryAnalysis)
 
         analyze_prompt = ChatPromptTemplate.from_messages([
@@ -517,12 +500,12 @@ class LegalRAGBuilder:
             ("human", "{query}")
         ])
 
-        def analyze_query(state: AgentState) -> AgentState:
+        async def analyze_query(state: AgentState) -> AgentState:
             query = state["user_query"]
             logger.info(f"Analyzing query: {query[:50]}...")
 
             chain = analyze_prompt | structured_llm
-            analysis: QueryAnalysis = chain.invoke({"query": query})
+            analysis: QueryAnalysis = await chain.ainvoke({"query": query})
 
             logger.info(
                 f"Analysis: category={analysis.category}, intent={analysis.intent_type}")
@@ -532,10 +515,10 @@ class LegalRAGBuilder:
         return analyze_query
 
     def _create_clarify_node(self):
-        """[노드: Clarify] 명확화 요청 노드 [사용 템플릿: TEMPLATE_CLARIFY]"""
+        """[노드: Clarify] 명확화 요청 노드"""
         template = self.config.TEMPLATE_CLARIFY
 
-        def request_clarification(state: AgentState) -> AgentState:
+        async def request_clarification(state: AgentState) -> AgentState:
             analysis = state.get("query_analysis", {})
             clarification_q = analysis.get(
                 "clarification_question", "질문을 좀 더 구체적으로 해주시겠어요?")
@@ -546,142 +529,134 @@ class LegalRAGBuilder:
         return request_clarification
 
     def _create_search_node(self):
-        """하이브리드 검색 노드"""
-        vectorstore = self.vectorstore
-        bm25_retriever = self.bm25_retriever
+        """하이브리드 검색 노드 (Async + Qdrant Native Hybrid)"""
+        client = self.client
+        embeddings = self.embeddings
+        sparse_manager = self.sparse_manager
         query_expander = self.query_expander
         reranker = self.reranker
         config = self.config
+        collection_name = self.vs_manager.get_collection_name()
 
-        def search_documents(state: AgentState) -> AgentState:
+        async def search_documents(state: AgentState) -> AgentState:
             original_query = state["user_query"]
             analysis = state.get("query_analysis", {})
             related_laws = analysis.get("related_laws", [])
 
-            # [HyDE + Hybrid] Query Expansion
+            # 1. Query Expansion (Async)
             keyword_query = original_query
             vector_query = original_query
 
             if query_expander:
-                try:
-                    hybrid = query_expander(original_query)
-                    keyword_query = hybrid.keyword_query  # BM25용
-                    # Vector용: HyDE passage 우선, 없으면 semantic_query
-                    vector_query = hybrid.hyde_passage if hybrid.hyde_passage else hybrid.semantic_query
+                hybrid = await query_expander(original_query)
+                keyword_query = hybrid.keyword_query
+                # Dense: HyDE 우선, 없으면 semantic_query
+                vector_query = hybrid.hyde_passage if hybrid.hyde_passage else hybrid.semantic_query
 
-                    logger.info(f"[HyDE] BM25 query: {keyword_query[:50]}...")
-                    logger.info(f"[HyDE] Vector query: {vector_query[:50]}...")
-                except Exception as e:
-                    logger.warning(
-                        f"Query expansion failed, using original: {e}")
+                logger.info(f"[Query] Keyword(Sparse): {keyword_query}")
+                logger.info(f"[Query] Vector(Dense): {vector_query[:50]}...")
 
-            all_docs = []
+            # 2. Embedding Generation (Parallel: Dense + Sparse)
+            # Embedding computation is CPU bound, run in thread if needed,
+            # but usually fast enough or we can use asyncio.to_thread
 
-            # 1. Vector Search - HyDE passage 사용 (LangSmith 추적을 위해 RunnableLambda 사용)
+            async def get_dense_vec():
+                return await asyncio.to_thread(embeddings.embed_query, vector_query)
+
+            async def get_sparse_vec():
+                if sparse_manager:
+                    return await asyncio.to_thread(sparse_manager.encode_query, keyword_query)
+                return None
+
+            dense_vec, sparse_vec = await asyncio.gather(get_dense_vec(), get_sparse_vec())
+
+            # 3. Qdrant Native Hybrid Search
             try:
-                # Vector Search를 Runnable로 감싸서 트레이싱에 보이게 함
-                vector_search_runnable = RunnableLambda(
-                    lambda q: vectorstore.similarity_search_with_score(
-                        q, k=config.TOP_K_VECTOR)
-                ).with_config({"run_name": "VectorSearch"})
-
-                vector_results = vector_search_runnable.invoke(vector_query)
-
-                vector_docs = [doc for doc, _ in vector_results]
-                for doc in vector_docs:
-                    doc.metadata["search_source"] = "vector"
-                all_docs.extend(vector_docs)
-                logger.info(f"Vector search (HyDE): {len(vector_docs)} docs")
-            except Exception as e:
-                logger.error(f"Vector search error: {e}")
-
-            # 2. BM25 Search - keyword_query 사용
-            if bm25_retriever:
-                try:
-                    bm25_docs = bm25_retriever.invoke(
-                        keyword_query)  # <-- keyword_query
-                    for doc in bm25_docs:
-                        doc.metadata["search_source"] = "bm25"
-                    all_docs.extend(bm25_docs)
-                    logger.info(
-                        f"BM25 search (keyword): {len(bm25_docs)} docs")
-                except Exception as e:
-                    logger.error(f"BM25 search error: {e}")
-
-            # 3. Deduplicate (LangSmith Traceable)
-            def deduplicate_logic(docs: List[Document]) -> List[Document]:
-                seen = set()
-                unique = []
-                for doc in docs:
-                    h = hash(doc.page_content[:200])
-                    if h not in seen:
-                        seen.add(h)
-                        unique.append(doc)
-                return unique
-
-            dedup_runnable = RunnableLambda(deduplicate_logic).with_config({
-                "run_name": "Deduplication"})
-            unique_docs = dedup_runnable.invoke(all_docs)
-            logger.info(f"After dedup: {len(unique_docs)} docs")
-
-            if not unique_docs:
-                return {"retrieved_docs": []}
-
-            # 4. Reranking (LangSmith Traceable)
-            def rerank_logic(input_data: dict) -> List[Document]:
-                _docs = input_data["docs"]
-                _query = input_data["query"]
-                if not reranker:
-                    return _docs
-                return reranker.compress_documents(_docs, _query)
-
-            rerank_runnable = RunnableLambda(rerank_logic).with_config({
-                "run_name": "Reranking"})
-
-            try:
-                reranked_docs = rerank_runnable.invoke(
-                    {"docs": unique_docs, "query": original_query})
-            except Exception as e:
-                logger.error(f"Rerank error: {e}")
-                reranked_docs = unique_docs
-
-            # 5. Filtering & Boosting (LangSmith Traceable)
-            def filter_logic(docs: List[Document]) -> List[Document]:
-                # Boost
-                if related_laws:
-                    for doc in docs:
-                        law_name = doc.metadata.get('law_name', '')
-                        for rel_law in related_laws:
-                            if rel_law in law_name:
-                                score = doc.metadata.get('relevance_score', 0)
-                                doc.metadata['relevance_score'] = min(
-                                    1.0, score + 0.1)
-                                doc.metadata['boosted'] = True
-                                break
-
-                # Filter
-                filtered = [
-                    d for d in docs
-                    if d.metadata.get('relevance_score', 0) >= config.RELEVANCE_THRESHOLD
+                prefetch = [
+                    models.Prefetch(
+                        query=dense_vec,
+                        using="dense",
+                        limit=config.TOP_K_VECTOR,
+                    )
                 ]
 
-                # Sort & Top-K
-                filtered.sort(key=lambda x: x.metadata.get(
-                    'relevance_score', 0), reverse=True)
-                return filtered[:config.TOP_K_FINAL]
+                if sparse_vec:
+                    prefetch.append(
+                        models.Prefetch(
+                            query=sparse_vec,
+                            using="sparse",
+                            limit=config.TOP_K_VECTOR,
+                        )
+                    )
 
-            filter_runnable = RunnableLambda(filter_logic).with_config({
-                "run_name": "Filtering"})
-            final_docs = filter_runnable.invoke(reranked_docs)
+                # Execute Search
+                results = await client.query_points(
+                    collection_name=collection_name,
+                    prefetch=prefetch,
+                    query=models.FusionQuery(method=models.Fusion.RRF),
+                    limit=config.TOP_K_VECTOR
+                )
+
+                # Convert to Documents
+                vector_docs = []
+                for point in results.points:
+                    payload = point.payload
+                    text = payload.get("text", "")
+                    if text:
+                        doc = Document(
+                            page_content=text,
+                            metadata={k: v for k, v in payload.items()
+                                      if k != "text"}
+                        )
+                        doc.metadata["relevance_score"] = point.score
+                        vector_docs.append(doc)
+
+                logger.info(f"Hybrid Search Results: {len(vector_docs)} docs")
+
+            except Exception as e:
+                logger.error(f"Search failed: {e}")
+                return {"retrieved_docs": []}
+
+            # 4. Reranking (Async wrap or sync)
+            if not vector_docs:
+                return {"retrieved_docs": []}
+
+            # Reranker logic (Sync) inside Async
+            def rerank_logic(docs, query):
+                if not reranker:
+                    return docs
+                return reranker.compress_documents(docs, query)
+
+            reranked_docs = await asyncio.to_thread(rerank_logic, vector_docs, original_query)
+
+            # 5. Filtering & Boosting
+            final_docs = []
+            for doc in reranked_docs:
+                score = doc.metadata.get('relevance_score', 0)
+
+                # Boosting
+                law_name = doc.metadata.get('law_name', '')
+                for rel_law in related_laws:
+                    if rel_law in law_name:
+                        score += 0.1
+                        doc.metadata['boosted'] = True
+                        break
+
+                if score >= config.RELEVANCE_THRESHOLD:
+                    final_docs.append(doc)
+
+            # Sort and Slice
+            final_docs.sort(key=lambda x: x.metadata.get(
+                'relevance_score', 0), reverse=True)
+            final_docs = final_docs[:config.TOP_K_FINAL]
 
             logger.info(f"Final selected: {len(final_docs)} docs")
-
             return {"retrieved_docs": final_docs}
 
         return search_documents
 
     def _create_generate_node(self):
-        """[노드: Generate] 답변 생성 노드 [사용 프롬프트: PROMPT_GENERATE, TEMPLATE_NO_RESULTS]"""
+        """[노드: Generate] 답변 생성 노드 (Async)"""
         llm = self.llm
         system_prompt = self.config.PROMPT_GENERATE
         no_results_template = self.config.TEMPLATE_NO_RESULTS
@@ -698,7 +673,7 @@ class LegalRAGBuilder:
 위 자료를 바탕으로 질문에 답변해주세요.""")
         ])
 
-        def generate_answer(state: AgentState) -> AgentState:
+        async def generate_answer(state: AgentState) -> AgentState:
             query = state["user_query"]
             docs = state.get("retrieved_docs", [])
             analysis = state.get("query_analysis", {})
@@ -739,7 +714,7 @@ class LegalRAGBuilder:
                 answer = no_results_template
             else:
                 chain = answer_prompt | llm
-                response = chain.invoke({
+                response = await chain.ainvoke({
                     "query": query,
                     "context": context,
                     "case_law_notice": case_law_notice
@@ -752,7 +727,7 @@ class LegalRAGBuilder:
         return generate_answer
 
     def _create_evaluate_node(self):
-        """[노드: Evaluate] 답변 평가 노드 [사용 프롬프트: PROMPT_EVALUATE]"""
+        """[노드: Evaluate] 답변 평가 노드 (Async)"""
         structured_llm = self.llm.with_structured_output(AnswerEvaluation)
 
         evaluate_prompt = ChatPromptTemplate.from_messages([
@@ -769,7 +744,7 @@ class LegalRAGBuilder:
 평가해주세요.""")
         ])
 
-        def evaluate_answer(state: AgentState) -> AgentState:
+        async def evaluate_answer(state: AgentState) -> AgentState:
             query = state["user_query"]
             answer = state.get("generated_answer", "")
             docs = state.get("retrieved_docs", [])
@@ -786,7 +761,7 @@ class LegalRAGBuilder:
                 context_summary = "(검색된 문서 없음)"
 
             chain = evaluate_prompt | structured_llm
-            evaluation: AnswerEvaluation = chain.invoke({
+            evaluation: AnswerEvaluation = await chain.ainvoke({
                 "query": query,
                 "context_summary": context_summary,
                 "answer": answer
@@ -827,132 +802,86 @@ class LegalRAGBuilder:
     # --- Build Graph ---
 
     def build(self) -> StateGraph:
-        """그래프 빌드"""
-        logger.info("Building Legal RAG Graph...")
-
-        # Infrastructure
+        """LangGraph 빌드"""
         self._init_infrastructure()
 
-        # Create nodes
-        analyze_node = self._create_analyze_node()
-        clarify_node = self._create_clarify_node()
-        search_node = self._create_search_node()
-        generate_node = self._create_generate_node()
-        evaluate_node = self._create_evaluate_node()
+        builder = StateGraph(AgentState)
 
-        # Build workflow
-        workflow = StateGraph(AgentState)
+        # Nodes
+        builder.add_node("analyze", self._create_analyze_node())
+        builder.add_node("clarify", self._create_clarify_node())
+        builder.add_node("search", self._create_search_node())
+        builder.add_node("generate", self._create_generate_node())
+        builder.add_node("evaluate", self._create_evaluate_node())
 
-        workflow.add_node("analyze", analyze_node)
-        workflow.add_node("clarify", clarify_node)
-        workflow.add_node("search", search_node)
-        workflow.add_node("generate", generate_node)
-        workflow.add_node("evaluate", evaluate_node)
+        # Edges
+        builder.set_entry_point("analyze")
 
-        workflow.set_entry_point("analyze")
-
-        workflow.add_conditional_edges(
+        builder.add_conditional_edges(
             "analyze",
             self._route_after_analysis,
-            {"clarify": "clarify", "search": "search"}
+            {
+                "clarify": "clarify",
+                "search": "search"
+            }
         )
 
-        workflow.add_edge("clarify", END)
-        workflow.add_edge("search", "generate")
-        workflow.add_edge("generate", "evaluate")
+        builder.add_edge("clarify", END)
+        builder.add_edge("search", "generate")
+        builder.add_edge("generate", "evaluate")
 
-        workflow.add_conditional_edges(
+        builder.add_conditional_edges(
             "evaluate",
             self._route_after_evaluation,
-            {"search": "search", "end": END}
+            {
+                "search": "search",
+                "end": END
+            }
         )
 
-        graph = workflow.compile()
-        logger.info("Graph built successfully")
-
-        return graph
+        return builder.compile()
 
 
 # ============================================================
-# [SECTION 8] Execution Layer - 진입점 및 실행 로직
+# [SECTION 8] Execution Layer - 실행 진입점
 # ============================================================
+async def main():
+    # Load ENV
+    load_dotenv()
 
-# 환경 변수 로드
-_DOTENV_PATH = Path(__file__).with_name(".env")
-load_dotenv(dotenv_path=_DOTENV_PATH)
+    print("🚀 Legal RAG Chatbot V8 (Async/Hybrid) Starting...")
 
-# 전역 Config
-config = Config()
+    config = Config()
+    app = LegalRAGBuilder(config).build()
 
+    # Test Query
+    # initial_query = "퇴직금 지급 기한과 안 줬을 때 신고 방법 알려줘"
+    initial_query = "근로계약서 미작성시 벌금은 얼마인가요?"
 
-def initialize_rag_chatbot():
-    """평가 스크립트용 초기화 함수"""
-    builder = LegalRAGBuilder(config)
-    return builder.build()
+    print(f"\n👤 질문: {initial_query}\n")
 
-
-def main():
-    """메인 실행 함수"""
-    if not os.getenv("OPENAI_API_KEY"):
-        logger.error("OPENAI_API_KEY is not set")
-        return
-
-    print("\n" + "=" * 60)
-    print("🚀 A-TEAM 법률 RAG 챗봇 (LangGraph V8) 시작")
-    print("=" * 60 + "\n")
+    initial_state = {
+        "messages": [HumanMessage(content=initial_query)],
+        "user_query": initial_query,
+        "retry_count": 0
+    }
 
     try:
-        graph = initialize_rag_chatbot()
+        result = await app.ainvoke(initial_state)
 
-        print("\n✅ 챗봇 준비 완료!")
-        print("💡 'exit' 또는 '종료'를 입력하면 종료됩니다\n")
+        print("\n" + "=" * 50)
+        print("🤖 AI 답변:")
+        print("=" * 50)
+        print(result.get("generated_answer", "답변 생성 실패"))
+        print("=" * 50)
 
-        while True:
-            try:
-                user_input = input("👤 User >> ").strip()
-
-                if user_input.lower() in ["exit", "quit", "종료", "q"]:
-                    print("\n👋 챗봇을 종료합니다.")
-                    break
-
-                if not user_input:
-                    print("❌ 질문을 입력해주세요.\n")
-                    continue
-
-                initial_state = {
-                    "messages": [HumanMessage(content=user_input)],
-                    "user_query": user_input,
-                    "query_analysis": None,
-                    "retrieved_docs": None,
-                    "generated_answer": None,
-                    "next_action": None,
-                    "evaluation_result": None,
-                    "retry_count": 0
-                }
-
-                result = graph.invoke(initial_state)
-
-                answer = result.get("generated_answer", "")
-                if answer:
-                    print("\n" + "=" * 60)
-                    print("🤖 AI 답변:")
-                    print("=" * 60)
-                    print(f"\n{answer}\n")
-                    print("=" * 60 + "\n")
-                else:
-                    print("\n⚠️ 답변을 생성할 수 없습니다.\n")
-
-            except KeyboardInterrupt:
-                print("\n\n👋 챗봇을 종료합니다.")
-                break
-            except Exception as e:
-                logger.error(f"Error: {e}")
-                print(f"\n❌ 오류 발생: {e}\n")
+        evaluation = result.get("evaluation_result", {})
+        print(f"📊 평가 점수: {evaluation.get('quality_score')}점")
 
     except Exception as e:
-        logger.error(f"Initialization failed: {e}")
-        raise
-
+        logger.error(f"Execution failed: {e}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

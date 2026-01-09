@@ -7,9 +7,10 @@ import re
 import os
 
 # 데이터 저장 경로 설정
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(SCRIPT_DIR, '..', 'data')
-RAW_DIR = os.path.join(DATA_DIR, 'raw')
+# scripts/crawlers -> scripts -> a_team -> a_team/data/raw
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))  # scripts/crawlers
+DATA_DIR = os.path.join(SCRIPT_DIR, '..', '..', 'data')  # a_team/data
+RAW_DIR = os.path.join(DATA_DIR, 'raw')  # a_team/data/raw
 
 # 디렉토리 생성
 os.makedirs(RAW_DIR, exist_ok=True)
@@ -28,9 +29,10 @@ headers = {
 }
 
 AJAX_LIST_URL = "https://www.law.go.kr/lsAstScListR.do"
+CATEGORY_SEARCH_URL = "https://www.law.go.kr/lsAstSc.do?menuId=391&subMenuId=397&tabMenuId=437&query="
 
-# 세 가지 분야 정의 (이미지에서 확인한 값들)
-CATEGORIES = [
+# 기본 카테고리 (자동 추출 실패 시 사용)
+DEFAULT_CATEGORIES = [
     {
         "name": "노동법",
         "lsFdCd": "40,40010000,40020000,40030000,40040000,40050000,40060000,40070000",
@@ -49,10 +51,82 @@ CATEGORIES = [
 ]
 
 
+def extract_all_categories():
+    """웹사이트에서 모든 법분야 카테고리를 자동으로 추출
+
+    Returns:
+        List of category dictionaries with 'name', 'lsFdCd', 'p5' keys
+    """
+    print("\n[카테고리 자동 추출] 웹사이트에서 모든 법분야 카테고리 추출 중...")
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+
+        try:
+            # 법령 검색 페이지 접속
+            page.goto(CATEGORY_SEARCH_URL)
+            page.wait_for_load_state('networkidle')
+            time.sleep(0.5)
+
+            # "법분야별" 탭 클릭 - 정확한 selector 사용 (div.tab3_1 > a:nth-of-type(2))
+            law_field_tab = page.locator('div.tab3_1 > a:nth-of-type(2)').first
+            law_field_tab.click()
+            time.sleep(1)
+
+            # 카테고리 목록이 보일 때까지 대기
+            page.wait_for_selector('#divLsFd', state='visible', timeout=10000)
+
+            # 모든 메인 카테고리 추출 (ID가 6자리인 것만: lsFd01, lsFd02, ...)
+            categories_data = page.evaluate('''() => {
+                const sidebar = document.querySelector('#divLsFd');
+                if (!sidebar) return [];
+                
+                const links = Array.from(sidebar.querySelectorAll('a[id^="lsFd"]'));
+                const mainCategories = links.filter(l => l.id.length === 6);
+                
+                return mainCategories.map(link => {
+                    const onclick = link.getAttribute('onclick') || '';
+                    const match = onclick.match(/clickLsFd\\('([^']+)'\\)/);
+                    const lsFdCd = match ? match[1] : '';
+                    
+                    return {
+                        id: link.id,
+                        name: (link.textContent || link.getAttribute('title') || '').trim(),
+                        lsFdCd: lsFdCd
+                    };
+                }).filter(cat => cat.lsFdCd !== '');  // lsFdCd가 있는 것만
+            }''')
+
+            browser.close()
+
+            if not categories_data:
+                print("  → 카테고리 추출 실패, 기본 카테고리 사용")
+                return DEFAULT_CATEGORIES
+
+            # 데이터 포맷팅
+            categories = []
+            for cat_data in categories_data:
+                categories.append({
+                    'name': cat_data['name'],
+                    'lsFdCd': cat_data['lsFdCd'],
+                    'p5': cat_data['lsFdCd'],  # p5도 동일한 값 사용
+                })
+
+            print(f"  → {len(categories)}개 카테고리 추출 완료")
+            return categories
+
+        except Exception as e:
+            print(f"  → 카테고리 추출 중 에러: {e}")
+            print("  → 기본 카테고리 사용")
+            browser.close()
+            return DEFAULT_CATEGORIES
+
+
 def get_list_params(page=1, category=None):
     """AJAX 요청 파라미터 - 분야별로 다른 파라미터 사용"""
     if category is None:
-        category = CATEGORIES[0]
+        category = DEFAULT_CATEGORIES[0]
 
     return {
         "lsFdCd": category["lsFdCd"],
@@ -150,7 +224,9 @@ def parse_meta_info(meta_text, law):
     meta_info = {
         'law_id': law['lsi_seq'],
         'law_name': law['title'],
-        'category': law.get('category', 'unknown'),
+        'category_main': law.get('category', 'unknown'),
+        'category_main_code': law.get('category_main_code'),
+        'category_sub_codes': law.get('category_sub_codes', []),
         'url': f"https://www.law.go.kr/lsInfoP.do?lsiSeq={law['lsi_seq']}&efYd={law.get('ef_yd', '')}",
         'enforce_date': None,
         'promulgation_date': None,
@@ -535,7 +611,7 @@ def get_law_details_with_playwright(laws, max_count=5, incremental_save=True):
 
                 # 실시간 저장 (법령 하나 크롤링될 때마다)
                 if incremental_save:
-                    category = meta_info.get('category', 'unknown')
+                    category = meta_info.get('category_main', 'unknown')
                     save_incremental(law_data, category)
                     print(f"  → rd_{category}.json 업데이트 완료")
 
@@ -559,12 +635,32 @@ def save_results(data, filename='law_data.json'):
 
 def main():
     print("=== 법령 크롤링 시작 ===")
-    print(f"크롤링 대상: {len(CATEGORIES)}개 분야\n")
+
+    # Step 0: 웹사이트에서 모든 카테고리 추출
+    categories = extract_all_categories()
+    print(f"\n크롤링 대상: {len(categories)}개 분야")
+
+    # 추출된 카테고리 목록 출력
+    print("\n[추출된 카테고리 목록]")
+    for i, cat in enumerate(categories[:10]):  # 처음 10개만 출력
+        print(f"  {i+1}. {cat['name']}")
+    if len(categories) > 10:
+        print(f"  ... 외 {len(categories) - 10}개")
+    print()
 
     # Step 1: 모든 분야의 법령 목록 가져오기
     print("[Step 1] 모든 분야 법령 목록 조회 중...")
-    laws = get_all_law_list()
-    print(f"\n총 {len(laws)}개 법령 발견\n")
+
+    all_laws = []
+    for i, category in enumerate(categories):
+        print(f"\n  [{i+1}/{len(categories)}] {category['name']} 분야 크롤링...")
+        laws = get_all_law_list_for_category(category)
+        all_laws.extend(laws)
+        print(f"  → {category['name']} 완료: {len(laws)}개 법령")
+
+    print(f"\n총 {len(all_laws)}개 법령 발견\n")
+
+    laws = all_laws  # 변수명 통일
 
     if not laws:
         print("목록을 가져오지 못했습니다.")
@@ -579,10 +675,10 @@ def main():
         # 전체 통합 파일 저장
         save_results(results, os.path.join(RAW_DIR, 'law_data_all.json'))
 
-        # 분야별 별도 파일 저장
-        for cat in CATEGORIES:
+        # 분야별 별도 파일 저장 (실시간 저장으로 이미 생성되었지만 최종 확인)
+        for cat in categories:
             cat_results = [r for r in results if r['meta_info']
-                           ['category'] == cat['name']]
+                           ['category_main'] == cat['name']]
             if cat_results:
                 filename = os.path.join(RAW_DIR, f"rd_{cat['name']}.json")
                 save_results(cat_results, filename)
@@ -595,14 +691,15 @@ def main():
             f"총 {len(results)}개 법령, {total_body}개 본조항, {total_addenda}개 부칙, {total_tables}개 별표 수집")
 
         # 분야별 통계
-        for cat in CATEGORIES:
+        for cat in categories:
             cat_results = [r for r in results if r['meta_info']
-                           ['category'] == cat['name']]
+                           ['category_main'] == cat['name']]
             cat_count = len(cat_results)
-            cat_body = sum(len(r['body']) for r in cat_results)
-            cat_addenda = sum(len(r['addenda']) for r in cat_results)
-            print(
-                f"  - {cat['name']}: {cat_count}개 법령, {cat_body}개 조항, {cat_addenda}개 부칙 → rd_{cat['name']}.json")
+            if cat_count > 0:
+                cat_body = sum(len(r['body']) for r in cat_results)
+                cat_addenda = sum(len(r['addenda']) for r in cat_results)
+                print(
+                    f"  - {cat['name']}: {cat_count}개 법령, {cat_body}개 조항, {cat_addenda}개 부칙 → rd_{cat['name']}.json")
     else:
         print("크롤링된 데이터가 없습니다.")
 
