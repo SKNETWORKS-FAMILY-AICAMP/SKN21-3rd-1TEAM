@@ -35,9 +35,6 @@ class LegalVectorDB:
                  sparse_model_name: str = "BAAI/bge-m3",
                  embedding_dim: int = 1024,
                  force_cpu: bool = False):
-                 dense_model_name: str = "Qwen/Qwen3-Embedding-0.6B",
-                 sparse_model_name: str = "BAAI/bge-m3",
-                 embedding_dim: int = 1024:
 
         # 1. Qdrant Client
         if url and api_key:

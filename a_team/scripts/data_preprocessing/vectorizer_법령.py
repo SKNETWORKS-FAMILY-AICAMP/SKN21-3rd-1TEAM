@@ -24,10 +24,26 @@ from a_team.scripts.common.vector_db import LegalVectorDB  # noqa: E402 # isort:
 
 SCRIPT_DIR = Path(__file__).parent
 DATA_DIR = SCRIPT_DIR / '..' / '..' / 'data'
+DATA_DIR = SCRIPT_DIR / '..' / '..' / 'data'
 PROCESSED_FILE = DATA_DIR / 'processed' / 'fd_법령_chunked.json'
 LOCAL_QDRANT_PATH = DATA_DIR / 'qdrant_local'
 
 EMBEDDING_MODEL = "Qwen/Qwen3-Embedding-0.6B"
+SPARSE_MODEL = "BAAI/bge-m3"
+
+# 환경 변수 로드 (Project Root .env)
+# scripts/data_preprocessing/../../.. -> Project Root
+PROJECT_ROOT = SCRIPT_DIR.parent.parent.parent
+ENV_PATH = PROJECT_ROOT / '.env'
+if not ENV_PATH.exists():
+    # Try finding it relative to current working dir if script assumption fails
+    ENV_PATH = Path(os.getcwd()) / '.env'
+
+print(f"🌍 Loading .env from: {ENV_PATH}")
+load_dotenv(ENV_PATH)
+
+QDRANT_URL = os.getenv("QDRANT_URL")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 SPARSE_MODEL = "BAAI/bge-m3"
 
 # 환경 변수 로드 (Project Root .env)
