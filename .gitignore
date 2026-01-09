@@ -46,6 +46,7 @@ env/
 logs/
 
 # Data files (large JSON files)
+a_team/data/raw/*.json
 !A-TEAM/data/raw/.gitkeep
 
 # Qdrant local DB (Docker 사용, 대용량 파일)
