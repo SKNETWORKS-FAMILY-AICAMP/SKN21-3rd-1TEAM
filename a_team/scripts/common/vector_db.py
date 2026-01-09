@@ -19,14 +19,10 @@ class LegalVectorDB:
     Qdrant Hybrid Search Client (Dense + Sparse)
     - Dense: SentenceTransformer (Qwen/Qwen3-Embedding-0.6B)
     - Sparse: BGE-M3 (BAAI/bge-m3) - Multilingual/Korean support
-<<<<<<< HEAD
-
     Storage Options:
     - Cloud: url + api_key
     - Server: host + port
     - Local: local_path (persistent disk storage)
-=======
->>>>>>> 209151e353aba59a2423f8158163afcb4a0cdf48
     """
 
     def __init__(self,
@@ -34,83 +30,62 @@ class LegalVectorDB:
                  api_key: str = None,
                  host: str = None,
                  port: int = 6333,
-<<<<<<< HEAD
                  local_path: str = None,
                  dense_model_name: str = "Qwen/Qwen3-Embedding-0.6B",
                  sparse_model_name: str = "BAAI/bge-m3",
                  embedding_dim: int = 1024,
                  force_cpu: bool = False):
-=======
                  dense_model_name: str = "Qwen/Qwen3-Embedding-0.6B",
                  sparse_model_name: str = "BAAI/bge-m3",
-                 embedding_dim: int = 1024):
->>>>>>> 209151e353aba59a2423f8158163afcb4a0cdf48
+                 embedding_dim: int = 1024:
 
         # 1. Qdrant Client
         if url and api_key:
             print(f"🌐 Qdrant Cloud Connect: {url[:30]}...")
-            self.client = QdrantClient(url=url, api_key=api_key, timeout=60)
+            self.client= QdrantClient(url=url, api_key=api_key, timeout=60)
         elif host:
             print(f"🏠 Qdrant Server Connect: {host}:{port}")
-            self.client = QdrantClient(host=host, port=port, timeout=60)
-<<<<<<< HEAD
+            self.client= QdrantClient(host=host, port=port, timeout=60)
         elif local_path:
             print(f"💾 Qdrant Local Storage: {local_path}")
             os.makedirs(local_path, exist_ok=True)
-            self.client = QdrantClient(path=local_path)
-=======
->>>>>>> 209151e353aba59a2423f8158163afcb4a0cdf48
+            self.client= QdrantClient(path=local_path)
         else:
             print("⚠️ No Connection Info, using Memory Mode")
-            self.client = QdrantClient(":memory:")
+            self.client= QdrantClient(":memory:")
 
-<<<<<<< HEAD
+
         # 2. Device Detection (MPS for Mac M-series, CUDA for NVIDIA, CPU fallback)
         if force_cpu:
-            self.device = "cpu"
+            self.device= "cpu"
             print("💻 Using CPU (force_cpu=True)")
         elif torch.backends.mps.is_available():
-            self.device = "mps"
+            self.device= "mps"
             print("🚀 Using MPS (Apple Silicon GPU)")
         elif torch.cuda.is_available():
-            self.device = "cuda"
+            self.device= "cuda"
             print("🚀 Using CUDA (NVIDIA GPU)")
         else:
-            self.device = "cpu"
+            self.device= "cpu"
             print("⚠️  Using CPU (No GPU acceleration)")
 
         # 3. Dense Model
         print(f"🧠 Loading Dense Model: {dense_model_name}")
-        self.dense_model = SentenceTransformer(
+        self.dense_model= SentenceTransformer(
             dense_model_name,
-            device=self.device,
-            trust_remote_code=True)
+            device = self.device,
+            trust_remote_code = True)
 
         # 4. Sparse Model (BGE-M3)
         print(f"🧠 Loading Sparse Model (BGE-M3): {sparse_model_name}...")
         # BGE-M3 can be used for Dense, Sparse, and ColBERT. We use it for Sparse here.
         # use_fp16=True for speed if GPU available (CUDA/MPS), else False.
-        use_fp16 = self.device in ["cuda", "mps"]
-        self.sparse_model = BGEM3FlagModel(
+        use_fp16= self.device in ["cuda", "mps"]
+        self.sparse_model= BGEM3FlagModel(
             sparse_model_name,
-            use_fp16=use_fp16,
-            device=self.device)
-=======
-        # 2. Dense Model
-        print(f"🧠 Loading Dense Model: {dense_model_name}")
-        self.dense_model = SentenceTransformer(
-            dense_model_name, trust_remote_code=True)
-
-        # 3. Sparse Model (BGE-M3)
-        print(f"🧠 Loading Sparse Model (BGE-M3): {sparse_model_name}...")
-        # BGE-M3 can be used for Dense, Sparse, and ColBERT. We use it for Sparse here.
-        # use_fp16=True for speed if GPU available, else False.
-        use_fp16 = torch.cuda.is_available()
-        self.sparse_model = BGEM3FlagModel(
-            sparse_model_name, use_fp16=use_fp16)
->>>>>>> 209151e353aba59a2423f8158163afcb4a0cdf48
-
-        self.embedding_dim = embedding_dim
+            use_fp16 = use_fp16,
+            device = self.device)
+        self.embedding_dim= embedding_dim
 
     def create_collection(self, name: str, recreate: bool = False):
         """Create Qdrant Collection with Dense and Sparse config"""
@@ -143,7 +118,6 @@ class LegalVectorDB:
         )
         print(f"✨ Collection '{name}' created (Dense + Sparse/BGE-M3)")
 
-<<<<<<< HEAD
     def get_collection_info(self, name: str) -> dict:
         """Get collection information (point count, etc.)"""
         try:
@@ -157,8 +131,7 @@ class LegalVectorDB:
             print(f"⚠️  Collection '{name}' not found or error: {e}")
             return {'points_count': 0, 'vectors_count': 0, 'status': 'not_found'}
 
-=======
->>>>>>> 209151e353aba59a2423f8158163afcb4a0cdf48
+
     def _get_sparse_vector(self, text: str) -> models.SparseVector:
         """Generate Sparse Vector using BGE-M3"""
         # BGE-M3 returns a dict of token_id: weight
@@ -199,10 +172,8 @@ class LegalVectorDB:
 
         total_saved = 0
         current_id = start_id
-<<<<<<< HEAD
         start_time = time.time()  # 시작 시간 기록
-=======
->>>>>>> 209151e353aba59a2423f8158163afcb4a0cdf48
+
 
         for i in range(0, total, batch_size):
             batch = chunks[i: i + batch_size]
@@ -233,7 +204,6 @@ class LegalVectorDB:
 
             total_saved += len(batch)
             current_id += len(batch)
-<<<<<<< HEAD
 
             # Memory cleanup (MPS/CUDA cache + garbage collection)
             if self.device in ["mps", "cuda"]:
@@ -261,12 +231,7 @@ class LegalVectorDB:
         total_time = time.time() - start_time
         print(
             f"\n✅ Upload to '{collection_name}' complete! 총 소요 시간: {int(total_time // 60)}분 {int(total_time % 60)}초")
-=======
-            print(
-                f"\r📥 Saved: {total_saved}/{total} ({total_saved/total*100:.1f}%)", end='', flush=True)
 
-        print(f"\n✅ Upload to '{collection_name}' complete!")
->>>>>>> 209151e353aba59a2423f8158163afcb4a0cdf48
 
     def _upsert_with_retry(self, collection_name, points, max_retries=3):
         for attempt in range(max_retries):

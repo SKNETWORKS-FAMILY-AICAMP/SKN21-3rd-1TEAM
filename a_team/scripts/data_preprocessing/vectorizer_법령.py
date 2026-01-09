@@ -1,9 +1,9 @@
 """
 법령 데이터 Qdrant 벡터 DB 업로드 스크립트 (Unified / BGE-M3)
 - common.vector_db.LegalVectorDB 사용
-<<<<<<< HEAD
 - 로컬 또는 클라우드 저장소 선택 가능
 """
+from a_team.scripts.common.json_utils import stream_json_array, count_json_array_items
 import os
 import sys
 import json
@@ -17,19 +17,6 @@ sys.path.append(os.path.abspath(os.path.join(
 
 from a_team.scripts.common.vector_db import LegalVectorDB  # noqa: E402 # isort: skip
 
-=======
-"""
-from a_team.scripts.common.vector_db import LegalVectorDB
-import os
-import sys
-import json
-from pathlib import Path
-from dotenv import load_dotenv
-
-# Common Module Import (Fix: 3 levels up to reach project root)
-sys.path.append(os.path.abspath(os.path.join(
-    os.path.dirname(__file__), '..', '..', '..')))
->>>>>>> 209151e353aba59a2423f8158163afcb4a0cdf48
 
 # ============================================================
 # 설정
@@ -64,7 +51,6 @@ def load_json(filepath):
     print(f"📂 Loading: {filepath}")
     with open(filepath, 'r', encoding='utf-8') as f:
         return json.load(f)
-<<<<<<< HEAD
 
 
 def parse_args():
@@ -120,8 +106,6 @@ def parse_args():
         help='종료 청크 인덱스 (병렬 처리용, None=끝까지)'
     )
     return parser.parse_args()
-=======
->>>>>>> 209151e353aba59a2423f8158163afcb4a0cdf48
 
 
 def main():
@@ -129,20 +113,15 @@ def main():
 
     print("=" * 60)
     print("⚖️  법령 데이터 Qdrant 업로드 (Hybrid: Qwen + BGE-M3)")
-<<<<<<< HEAD
+
     print(f"📦 저장소 모드: {args.storage_mode.upper()}")
-=======
->>>>>>> 209151e353aba59a2423f8158163afcb4a0cdf48
     print("=" * 60)
 
     if not PROCESSED_FILE.exists():
         print(f"❌ 전처리된 파일이 없습니다: {PROCESSED_FILE}")
         print("💡 먼저 'uv run a_team/scripts/data_preprocessing/preprocesser_법령.py'를 실행하세요.")
         return
-
-<<<<<<< HEAD
     # 스트리밍 방식으로 변경 (메모리 효율: ~1GB → ~50MB)
-    from a_team.scripts.common.json_utils import stream_json_array, count_json_array_items
 
     print("📊 청크 수 확인 중...")
     total_chunks = count_json_array_items(PROCESSED_FILE)
@@ -234,24 +213,6 @@ def main():
     if args.storage_mode == 'local':
         print(f"📂 저장 위치: {args.local_path}")
     print("=" * 60)
-=======
-    chunks = load_json(PROCESSED_FILE)
-    print(f"📊 로드된 청크: {len(chunks)}개")
-
-    # DB 초기화
-    db = LegalVectorDB(
-        url=QDRANT_URL,
-        api_key=QDRANT_API_KEY,
-        dense_model_name=EMBEDDING_MODEL,
-        sparse_model_name=SPARSE_MODEL
-    )
-
-    # 컬렉션 생성 (Main Script -> recreate=True)
-    db.create_collection(COLLECTION_NAME, recreate=True)
-
-    # 업서트
-    db.upsert_chunks(COLLECTION_NAME, chunks, batch_size=12)
->>>>>>> 209151e353aba59a2423f8158163afcb4a0cdf48
 
 
 if __name__ == "__main__":
